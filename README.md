@@ -9,6 +9,9 @@ Google is the default search engine. No analytics, no accounts, no third-party s
 - Find in page
 - Desktop site mode
 - Downloads through the system download manager
+- Bookmarks (stored on the device only)
+- Native start page: opening the app or a new tab contacts no server
+- File uploads through the system picker, and fullscreen video
 - Opens `http` and `https` links from other apps
 
 ## Building
@@ -45,10 +48,24 @@ Cleartext traffic is allowed so that `localhost`, LAN addresses and dev servers 
 - Clear data on exit, or on demand.
 - The only permission requested is `INTERNET`.
 
+## Release builds
+
+Copy `keystore.properties.example` to `keystore.properties`, fill in your keystore details and run
+`gradle assembleRelease`. Without that file the release build is left unsigned.
+Create a keystore with `keytool -genkey -v -keystore brisa.jks -keyalg RSA -keysize 2048 -validity 10000 -alias brisa`.
+Never commit the keystore or `keystore.properties`.
+
+## File System Access API
+
+`showOpenFilePicker()`, `showSaveFilePicker()` and `showDirectoryPicker()` reach Android WebView through
+the same file chooser callback used for `<input type="file">`, which Brisa implements. Whether they work
+depends on the installed WebView version, and save and folder pickers are limited on Android.
+The Origin Private File System is a separate feature and does not need this.
+
 ## Not yet implemented
 
-Bookmarks, file uploads, release signing. Private tabs are not possible with a plain `WebView`,
-which shares a single cookie store across the whole app.
+Private tabs are not possible with a plain `WebView`, which shares a single cookie store across the app.
+History, a bookmark manager with folders, and per-site permissions are not implemented.
 
 ## License
 

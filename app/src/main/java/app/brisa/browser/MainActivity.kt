@@ -1,6 +1,7 @@
 package app.brisa.browser
 
 import android.app.DownloadManager
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Bitmap
@@ -24,6 +25,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
+import android.webkit.ValueCallback
 import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -31,8 +33,12 @@ import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.TextView
 import androidx.activity.addCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.edit
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.core.widget.doOnTextChanged
@@ -45,6 +51,7 @@ class MainActivity : AppCompatActivity() {
 
     private class Tab(val web: WebView) {
         var title = ""
+        var home = false
         var loading = false
         var progress = 0
         var upgradedUrl: String? = null
@@ -58,6 +65,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var current: Tab
     private val web get() = current.web
 
+    private var fileCallback: ValueCallback<Array<Uri>>? = null
+    private var customView: View? = null
+    private var customCallback: WebChromeClient.CustomViewCallback? = null
+
+    private val filePicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        fileCallback?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data))
+        fileCallback = null
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ui = ActivityMainBinding.inflate(layoutInflater)
@@ -66,7 +82,7 @@ class MainActivity : AppCompatActivity() {
 
         setupBars()
         onBackPressedDispatcher.addCallback(this) { goBack() }
-        newTab(externalUrl(intent) ?: HOME)
+        newTab(externalUrl(intent))
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -99,7 +115,7 @@ class MainActivity : AppCompatActivity() {
 
     // region tabs
 
-    private fun newTab(url: String) {
+    private fun newTab(url: String?) {
         val tab = Tab(WebView(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -108,13 +124,16 @@ class MainActivity : AppCompatActivity() {
         })
         configure(tab)
         tabs += tab
+        tab.home = url == null
         select(tab)
-        open(url, tab)
+        if (url != null) open(url, tab)
     }
 
     private fun select(tab: Tab) {
+        exitFullscreen()
         closeFind()
         current = tab
+        ui.home.isVisible = tab.home
         ui.webContainer.removeAllViews()
         ui.webContainer.addView(tab.web)
         ui.urlBar.clearFocus()
@@ -128,7 +147,7 @@ class MainActivity : AppCompatActivity() {
         val index = tabs.indexOf(tab)
         if (index < 0) return
         tabs.removeAt(index)
-        if (tabs.isEmpty()) newTab(HOME)
+        if (tabs.isEmpty()) newTab(null)
         else if (tab === current) select(tabs[minOf(index, tabs.lastIndex)])
         destroy(tab)
         updateTabCount()
@@ -141,6 +160,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun goBack() {
         when {
+            customView != null -> exitFullscreen()
             ui.findBar.isVisible -> closeFind()
             web.canGoBack() -> web.goBack()
             tabs.size > 1 -> closeTab(current)
@@ -179,7 +199,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         content.findViewById<View>(R.id.newTab).setOnClickListener {
-            newTab(HOME)
+            newBlankTab()
             sheet.dismiss()
         }
         fill()
@@ -264,6 +284,39 @@ class MainActivity : AppCompatActivity() {
                 tab.title = title.orEmpty()
             }
 
+            override fun onShowFileChooser(
+                view: WebView,
+                callback: ValueCallback<Array<Uri>>,
+                params: WebChromeClient.FileChooserParams,
+            ): Boolean {
+                fileCallback?.onReceiveValue(null)
+                fileCallback = callback
+                try {
+                    filePicker.launch(params.createIntent())
+                } catch (e: ActivityNotFoundException) {
+                    fileCallback = null
+                    callback.onReceiveValue(null)
+                }
+                return true
+            }
+
+            override fun onShowCustomView(view: View, callback: WebChromeClient.CustomViewCallback) {
+                if (customView != null) {
+                    callback.onCustomViewHidden()
+                    return
+                }
+                customView = view
+                customCallback = callback
+                ui.fullscreen.addView(view)
+                ui.fullscreen.isVisible = true
+                WindowCompat.getInsetsController(window, window.decorView).apply {
+                    systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    hide(WindowInsetsCompat.Type.systemBars())
+                }
+            }
+
+            override fun onHideCustomView() = exitFullscreen()
+
             override fun onPermissionRequest(request: PermissionRequest) = request.deny()
 
             override fun onGeolocationPermissionsShowPrompt(
@@ -330,6 +383,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun open(url: String, tab: Tab = current) {
         val uri = Uri.parse(url)
+        tab.home = false
+        if (tab === current) ui.home.isGone = true
         tab.fallbackUrl = null
         tab.upgradedUrl = null
         var target = url
@@ -397,6 +452,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         ui.tabsButton.setOnClickListener { showTabs() }
+        ui.homeSearch.setOnClickListener { focusUrlBar() }
         ui.menu.setOnClickListener { showMenu() }
 
         ui.findInput.doOnTextChanged { text, _, _, _ ->
@@ -423,12 +479,19 @@ class MainActivity : AppCompatActivity() {
             menu.findItem(R.id.action_forward).isEnabled = web.canGoForward()
             menu.findItem(R.id.action_reload).setTitle(if (current.loading) R.string.stop else R.string.reload)
             menu.findItem(R.id.action_desktop).isChecked = prefs.getBoolean(Prefs.DESKTOP, false)
+            menu.findItem(R.id.action_bookmark).apply {
+                val url = web.url
+                isEnabled = url != null
+                setTitle(if (url != null && Bookmarks.contains(this@MainActivity, url)) R.string.remove_bookmark else R.string.add_bookmark)
+            }
             setOnMenuItemClickListener { item ->
                 when (item.itemId) {
-                    R.id.action_new_tab -> newTab(HOME)
+                    R.id.action_new_tab -> newBlankTab()
                     R.id.action_back -> web.goBack()
                     R.id.action_forward -> web.goForward()
                     R.id.action_reload -> if (current.loading) web.stopLoading() else web.reload()
+                    R.id.action_bookmark -> toggleBookmark()
+                    R.id.action_bookmarks -> showBookmarks()
                     R.id.action_find -> openFind()
                     R.id.action_share -> share()
                     R.id.action_desktop -> {
@@ -458,6 +521,71 @@ class MainActivity : AppCompatActivity() {
         ui.findBar.isGone = true
         hideKeyboard(ui.findInput)
     }
+
+    private fun newBlankTab() {
+        newTab(null)
+        focusUrlBar()
+    }
+
+    private fun focusUrlBar() {
+        ui.urlBar.requestFocus()
+        getSystemService(InputMethodManager::class.java).showSoftInput(ui.urlBar, 0)
+    }
+
+    private fun exitFullscreen() {
+        val view = customView ?: return
+        ui.fullscreen.removeView(view)
+        ui.fullscreen.isGone = true
+        customView = null
+        customCallback?.onCustomViewHidden()
+        customCallback = null
+        WindowCompat.getInsetsController(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
+    }
+
+    private fun toggleBookmark() {
+        val url = web.url ?: return
+        if (Bookmarks.contains(this, url)) Bookmarks.remove(this, url)
+        else Bookmarks.add(this, titleOf(current), url)
+    }
+
+    private fun showBookmarks() {
+        val sheet = BottomSheetDialog(this)
+        val content = layoutInflater.inflate(R.layout.sheet_tabs, null)
+        content.findViewById<TextView>(R.id.sheetTitle).setText(R.string.bookmarks)
+        content.findViewById<View>(R.id.newTab).isGone = true
+        val list = content.findViewById<LinearLayout>(R.id.tabList)
+
+        fun fill() {
+            list.removeAllViews()
+            val items = Bookmarks.all(this)
+            if (items.isEmpty()) {
+                list.addView(TextView(this).apply {
+                    setText(R.string.empty_bookmarks)
+                    setTextColor(getColor(R.color.muted))
+                    setPadding(dp(24), dp(12), dp(24), dp(12))
+                })
+            }
+            for (item in items) {
+                val row = layoutInflater.inflate(R.layout.item_tab, list, false)
+                row.findViewById<TextView>(R.id.tabTitle).text = item.title.ifBlank { item.url }
+                row.setOnClickListener {
+                    open(item.url)
+                    sheet.dismiss()
+                }
+                row.findViewById<View>(R.id.tabClose).setOnClickListener {
+                    Bookmarks.remove(this, item.url)
+                    fill()
+                }
+                list.addView(row)
+            }
+        }
+
+        fill()
+        sheet.setContentView(content)
+        sheet.show()
+    }
+
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     private fun share() {
         val url = web.url ?: return
@@ -498,7 +626,6 @@ class MainActivity : AppCompatActivity() {
     // endregion
 
     private companion object {
-        const val HOME = "https://www.google.com"
         const val DESKTOP_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         val PRIVATE_IP = Regex("^(127\\.|10\\.|192\\.168\\.|169\\.254\\.|172\\.(1[6-9]|2\\d|3[01])\\.)")

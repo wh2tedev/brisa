@@ -37,4 +37,8 @@
     <string name="pref_js">JavaScript</string>
     <string name="pref_js_sum">Turning it off improves privacy but breaks many sites</string>
     <string name="data_cleared">Browsing data cleared</string>
+    <string name="bookmarks">Bookmarks</string>
+    <string name="add_bookmark">Add bookmark</string>
+    <string name="remove_bookmark">Remove bookmark</string>
+    <string name="empty_bookmarks">No bookmarks yet</string>
 </resources>
