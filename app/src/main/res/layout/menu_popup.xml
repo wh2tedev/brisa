@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:clipChildren="false"
+    android:clipToPadding="false"
+    android:padding="10dp">
+
+    <LinearLayout
+        android:id="@+id/card"
+        android:layout_width="264dp"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_popup"
+        android:elevation="8dp"
+        android:orientation="vertical"
+        android:paddingVertical="8dp">
+
+        <LinearLayout
+            android:id="@+id/iconRow"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:orientation="horizontal">
+
+            <ImageButton
+                android:id="@+id/iconBack"
+                style="@style/IconButton"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:contentDescription="@string/back"
+                android:src="@drawable/ic_arrow_back" />
+
+            <ImageButton
+                android:id="@+id/iconForward"
+                style="@style/IconButton"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:contentDescription="@string/forward"
+                android:src="@drawable/ic_arrow_forward" />
+
+            <ImageButton
+                android:id="@+id/iconBookmark"
+                style="@style/IconButton"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:contentDescription="@string/add_bookmark"
+                android:src="@drawable/ic_star_border" />
+
+            <ImageButton
+                android:id="@+id/iconReload"
+                style="@style/IconButton"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:contentDescription="@string/reload"
+                android:src="@drawable/ic_refresh" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginVertical="4dp"
+            android:background="@color/divider" />
+
+        <TextView
+            android:id="@+id/rowNewTab"
+            style="@style/MenuRow"
+            android:text="@string/new_tab" />
+
+        <TextView
+            android:id="@+id/rowFind"
+            style="@style/MenuRow"
+            android:text="@string/find_in_page" />
+
+        <TextView
+            android:id="@+id/rowShare"
+            style="@style/MenuRow"
+            android:text="@string/share" />
+
+        <TextView
+            android:id="@+id/rowBookmarks"
+            style="@style/MenuRow"
+            android:text="@string/bookmarks" />
+
+        <LinearLayout
+            android:id="@+id/rowDesktop"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="20dp"
+            android:paddingEnd="16dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/desktop_site"
+                android:textColor="@color/on_bg"
+                android:textSize="15sp" />
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/desktopSwitch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:clickable="false"
+                android:focusable="false" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/rowSettings"
+            style="@style/MenuRow"
+            android:text="@string/settings" />
+    </LinearLayout>
+</FrameLayout>

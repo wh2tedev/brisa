@@ -10,7 +10,8 @@ Google is the default search engine. No analytics, no accounts, no third-party s
 - Desktop site mode
 - Downloads through the system download manager
 - Bookmarks (stored on the device only)
-- Native start page: opening the app or a new tab contacts no server
+- Material 3 motion: spring press feedback, animated menu, tab sheet and omnibox, shared-axis transitions
+- Connection indicator in the address bar (lock for HTTPS, warning for HTTP)
 - File uploads through the system picker, and fullscreen video
 - Opens `http` and `https` links from other apps
 

@@ -1,36 +1,45 @@
 package app.brisa.browser
 
+import android.animation.LayoutTransition
+import android.animation.ValueAnimator
+import android.app.ActivityOptions
 import android.app.DownloadManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.net.http.SslError
 import android.os.Bundle
 import android.os.Environment
+import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.view.animation.OvershootInterpolator
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.SslErrorHandler
 import android.webkit.URLUtil
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
-import android.webkit.ValueCallback
 import android.webkit.WebViewClient
-import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.PopupMenu
+import android.widget.PopupWindow
 import android.widget.TextView
 import androidx.activity.addCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -39,11 +48,13 @@ import androidx.core.content.edit
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.doOnLayout
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.core.widget.doOnTextChanged
 import androidx.preference.PreferenceManager
 import app.brisa.browser.databinding.ActivityMainBinding
+import app.brisa.browser.databinding.MenuPopupBinding
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.snackbar.Snackbar
 
@@ -51,7 +62,6 @@ class MainActivity : AppCompatActivity() {
 
     private class Tab(val web: WebView) {
         var title = ""
-        var home = false
         var loading = false
         var progress = 0
         var upgradedUrl: String? = null
@@ -61,9 +71,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var ui: ActivityMainBinding
     private lateinit var prefs: SharedPreferences
     private val defaultUa by lazy { WebSettings.getDefaultUserAgent(this) }
+    private val omniBg by lazy { ui.omnibox.background.mutate() as GradientDrawable }
     private val tabs = mutableListOf<Tab>()
     private lateinit var current: Tab
     private val web get() = current.web
+    private var clearShown = false
 
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var customView: View? = null
@@ -82,7 +94,7 @@ class MainActivity : AppCompatActivity() {
 
         setupBars()
         onBackPressedDispatcher.addCallback(this) { goBack() }
-        newTab(externalUrl(intent))
+        newTab(externalUrl(intent) ?: HOME)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -115,7 +127,7 @@ class MainActivity : AppCompatActivity() {
 
     // region tabs
 
-    private fun newTab(url: String?) {
+    private fun newTab(url: String) {
         val tab = Tab(WebView(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -124,18 +136,21 @@ class MainActivity : AppCompatActivity() {
         })
         configure(tab)
         tabs += tab
-        tab.home = url == null
         select(tab)
-        if (url != null) open(url, tab)
+        open(url, tab)
     }
 
     private fun select(tab: Tab) {
         exitFullscreen()
         closeFind()
         current = tab
-        ui.home.isVisible = tab.home
         ui.webContainer.removeAllViews()
         ui.webContainer.addView(tab.web)
+        ui.webContainer.apply {
+            alpha = 0f
+            translationY = dp(10).toFloat()
+            animate().alpha(1f).translationY(0f).setDuration(Motion.MEDIUM).setInterpolator(Motion.decelerate).start()
+        }
         ui.urlBar.clearFocus()
         showUrl(tab.web.url)
         ui.progress.setProgressCompat(tab.progress, false)
@@ -147,7 +162,7 @@ class MainActivity : AppCompatActivity() {
         val index = tabs.indexOf(tab)
         if (index < 0) return
         tabs.removeAt(index)
-        if (tabs.isEmpty()) newTab(null)
+        if (tabs.isEmpty()) newTab(HOME)
         else if (tab === current) select(tabs[minOf(index, tabs.lastIndex)])
         destroy(tab)
         updateTabCount()
@@ -169,40 +184,143 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateTabCount() {
-        ui.tabCount.text = tabs.size.toString()
+        val label = tabs.size.toString()
+        if (ui.tabCount.text == label) return
+        ui.tabCount.text = label
+        ui.tabCount.animate().cancel()
+        ui.tabCount.scaleX = 1.4f
+        ui.tabCount.scaleY = 1.4f
+        ui.tabCount.animate().scaleX(1f).scaleY(1f).setDuration(320).setInterpolator(OvershootInterpolator(3f)).start()
     }
 
     private fun titleOf(tab: Tab): String =
         tab.title.ifBlank { display(tab.web.url) }.ifBlank { getString(R.string.new_tab) }
 
-    private fun showTabs() {
+    // endregion
+
+    // region sheets
+
+    private fun sheetContent(title: Int): Triple<BottomSheetDialog, View, LinearLayout> {
         val sheet = BottomSheetDialog(this)
         val content = layoutInflater.inflate(R.layout.sheet_tabs, null)
-        val list = content.findViewById<LinearLayout>(R.id.tabList)
+        content.findViewById<TextView>(R.id.sheetTitle).setText(title)
+        return Triple(sheet, content, content.findViewById(R.id.tabList))
+    }
 
-        fun fill() {
+    private fun row(
+        list: LinearLayout,
+        title: String,
+        subtitle: String,
+        index: Int,
+        animate: Boolean,
+        onOpen: () -> Unit,
+        onClose: (View) -> Unit,
+    ): View {
+        val row = layoutInflater.inflate(R.layout.item_tab, list, false)
+        row.findViewById<TextView>(R.id.tabTitle).text = title
+        row.findViewById<TextView>(R.id.tabSubtitle).apply {
+            text = subtitle
+            isGone = subtitle.isEmpty() || subtitle == title
+        }
+        row.setOnClickListener { onOpen() }
+        row.findViewById<View>(R.id.tabClose).apply {
+            pressable()
+            setOnClickListener { onClose(row) }
+        }
+        if (animate) {
+            row.alpha = 0f
+            row.translationY = dp(14).toFloat()
+            row.animate().alpha(1f).translationY(0f).setStartDelay(60L + index * 35L)
+                .setDuration(280).setInterpolator(Motion.decelerate).start()
+        }
+        return row
+    }
+
+    private fun slideOut(row: View, then: () -> Unit) {
+        row.animate().translationX(row.width.toFloat()).alpha(0f).setDuration(Motion.SHORT + 40)
+            .setInterpolator(Motion.accelerate).withEndAction { then() }.start()
+    }
+
+    private fun smoothRemoval(list: LinearLayout) {
+        list.layoutTransition = LayoutTransition().apply {
+            disableTransitionType(LayoutTransition.APPEARING)
+            disableTransitionType(LayoutTransition.DISAPPEARING)
+            setDuration(220)
+        }
+    }
+
+    private fun showTabs() {
+        val (sheet, content, list) = sheetContent(R.string.tabs)
+
+        fun fill(animate: Boolean) {
             list.removeAllViews()
-            for (tab in tabs.toList()) {
-                val row = layoutInflater.inflate(R.layout.item_tab, list, false)
-                row.findViewById<TextView>(R.id.tabTitle).text = titleOf(tab)
-                if (tab === current) row.setBackgroundColor(getColor(R.color.toolbar))
-                row.setOnClickListener {
-                    select(tab)
-                    sheet.dismiss()
-                }
-                row.findViewById<View>(R.id.tabClose).setOnClickListener {
-                    closeTab(tab)
-                    fill()
-                }
-                list.addView(row)
+            tabs.toList().forEachIndexed { index, tab ->
+                val view = row(
+                    list, titleOf(tab), display(tab.web.url), index, animate,
+                    onOpen = {
+                        select(tab)
+                        sheet.dismiss()
+                    },
+                    onClose = { row ->
+                        val last = tabs.size == 1
+                        slideOut(row) {
+                            closeTab(tab)
+                            if (last) fill(false) else list.removeView(row)
+                        }
+                    },
+                )
+                if (tab === current) view.setBackgroundColor(getColor(R.color.toolbar))
+                list.addView(view)
             }
         }
 
-        content.findViewById<View>(R.id.newTab).setOnClickListener {
-            newBlankTab()
-            sheet.dismiss()
+        content.findViewById<View>(R.id.newTab).apply {
+            pressable(0.95f)
+            setOnClickListener {
+                newTab(HOME)
+                sheet.dismiss()
+            }
         }
+        fill(true)
+        smoothRemoval(list)
+        sheet.setContentView(content)
+        sheet.show()
+    }
+
+    private fun showBookmarks() {
+        val (sheet, content, list) = sheetContent(R.string.bookmarks)
+        content.findViewById<View>(R.id.newTab).isGone = true
+
+        fun fill() {
+            list.removeAllViews()
+            val items = Bookmarks.all(this)
+            if (items.isEmpty()) {
+                list.addView(TextView(this).apply {
+                    setText(R.string.empty_bookmarks)
+                    setTextColor(getColor(R.color.muted))
+                    setPadding(dp(24), dp(12), dp(24), dp(12))
+                })
+            }
+            items.forEachIndexed { index, item ->
+                list.addView(row(
+                    list, item.title.ifBlank { item.url }, display(item.url), index, true,
+                    onOpen = {
+                        open(item.url)
+                        sheet.dismiss()
+                    },
+                    onClose = { row ->
+                        slideOut(row) {
+                            Bookmarks.remove(this, item.url)
+                            list.removeView(row)
+                            if (list.childCount == 0) fill()
+                        }
+                    },
+                ))
+            }
+        }
+
         fill()
+        smoothRemoval(list)
         sheet.setContentView(content)
         sheet.show()
     }
@@ -308,7 +426,9 @@ class MainActivity : AppCompatActivity() {
                 customView = view
                 customCallback = callback
                 ui.fullscreen.addView(view)
+                ui.fullscreen.alpha = 0f
                 ui.fullscreen.isVisible = true
+                ui.fullscreen.animate().alpha(1f).setDuration(Motion.MEDIUM).start()
                 WindowCompat.getInsetsController(window, window.decorView).apply {
                     systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                     hide(WindowInsetsCompat.Type.systemBars())
@@ -383,8 +503,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun open(url: String, tab: Tab = current) {
         val uri = Uri.parse(url)
-        tab.home = false
-        if (tab === current) ui.home.isGone = true
         tab.fallbackUrl = null
         tab.upgradedUrl = null
         var target = url
@@ -434,6 +552,8 @@ class MainActivity : AppCompatActivity() {
     // region ui
 
     private fun setupBars() {
+        listOf(ui.tabsButton, ui.menu, ui.clearUrl, ui.findPrev, ui.findNext, ui.findClose).forEach { it.pressable() }
+
         ui.urlBar.setOnEditorActionListener { v, action, _ ->
             if (action == EditorInfo.IME_ACTION_GO) {
                 open(resolve(v.text.toString()))
@@ -442,17 +562,16 @@ class MainActivity : AppCompatActivity() {
                 true
             } else false
         }
-        ui.urlBar.setOnFocusChangeListener { v, focused ->
-            val field = v as EditText
-            if (focused) {
-                field.setText(web.url.orEmpty())
-                field.selectAll()
-            } else {
-                field.setText(display(web.url))
-            }
+        ui.urlBar.setOnFocusChangeListener { _, focused ->
+            ui.urlBar.setText(if (focused) web.url.orEmpty() else display(web.url))
+            if (focused) ui.urlBar.selectAll()
+            animateFocus(focused)
+            updateSiteIcon(web.url)
+            updateClear()
         }
+        ui.urlBar.doOnTextChanged { _, _, _, _ -> updateClear() }
+        ui.clearUrl.setOnClickListener { ui.urlBar.text?.clear() }
         ui.tabsButton.setOnClickListener { showTabs() }
-        ui.homeSearch.setOnClickListener { focusUrlBar() }
         ui.menu.setOnClickListener { showMenu() }
 
         ui.findInput.doOnTextChanged { text, _, _, _ ->
@@ -472,43 +591,150 @@ class MainActivity : AppCompatActivity() {
         ui.findClose.setOnClickListener { closeFind() }
     }
 
+    private fun animateFocus(focused: Boolean) {
+        val accent = getColor(R.color.accent)
+        val clear = accent and 0x00FFFFFF
+        ValueAnimator.ofArgb(if (focused) clear else accent, if (focused) accent else clear).apply {
+            duration = Motion.MEDIUM
+            interpolator = Motion.standard
+            addUpdateListener { omniBg.setStroke(dp(2), it.animatedValue as Int) }
+            start()
+        }
+    }
+
+    private fun updateSiteIcon(url: String?) {
+        val (icon, color) = when {
+            ui.urlBar.hasFocus() || url.isNullOrEmpty() -> R.drawable.ic_search to R.color.muted
+            url.orEmpty().startsWith("https://") -> R.drawable.ic_lock to R.color.muted
+            else -> R.drawable.ic_lock_open to R.color.warning
+        }
+        if (ui.siteIcon.tag == icon) return
+        ui.siteIcon.tag = icon
+        ui.siteIcon.animate().cancel()
+        ui.siteIcon.animate().alpha(0f).setDuration(80).withEndAction {
+            ui.siteIcon.setImageResource(icon)
+            ui.siteIcon.imageTintList = ColorStateList.valueOf(getColor(color))
+            ui.siteIcon.animate().alpha(1f).setDuration(140).start()
+        }.start()
+    }
+
+    private fun updateClear() {
+        val show = ui.urlBar.hasFocus() && !ui.urlBar.text.isNullOrEmpty()
+        if (show == clearShown) return
+        clearShown = show
+        ui.clearUrl.animate().cancel()
+        if (show) {
+            ui.clearUrl.alpha = 0f
+            ui.clearUrl.scaleX = 0.6f
+            ui.clearUrl.scaleY = 0.6f
+            ui.clearUrl.isVisible = true
+            ui.clearUrl.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(Motion.SHORT)
+                .setInterpolator(Motion.decelerate).start()
+        } else {
+            ui.clearUrl.animate().alpha(0f).scaleX(0.6f).scaleY(0.6f).setDuration(100)
+                .withEndAction { if (!clearShown) ui.clearUrl.isGone = true }.start()
+        }
+    }
+
     private fun showMenu() {
-        PopupMenu(this, ui.menu).apply {
-            menuInflater.inflate(R.menu.main, menu)
-            menu.findItem(R.id.action_back).isEnabled = web.canGoBack()
-            menu.findItem(R.id.action_forward).isEnabled = web.canGoForward()
-            menu.findItem(R.id.action_reload).setTitle(if (current.loading) R.string.stop else R.string.reload)
-            menu.findItem(R.id.action_desktop).isChecked = prefs.getBoolean(Prefs.DESKTOP, false)
-            menu.findItem(R.id.action_bookmark).apply {
-                val url = web.url
-                isEnabled = url != null
-                setTitle(if (url != null && Bookmarks.contains(this@MainActivity, url)) R.string.remove_bookmark else R.string.add_bookmark)
+        ui.menu.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+        val m = MenuPopupBinding.inflate(layoutInflater)
+        val popup = PopupWindow(m.root, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, true)
+        popup.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+
+        val url = web.url
+        val bookmarked = url != null && Bookmarks.contains(this, url)
+        m.iconBack.enable(web.canGoBack())
+        m.iconForward.enable(web.canGoForward())
+        m.iconBookmark.enable(url != null)
+        m.iconBookmark.setImageResource(if (bookmarked) R.drawable.ic_star else R.drawable.ic_star_border)
+        m.iconBookmark.contentDescription =
+            getString(if (bookmarked) R.string.remove_bookmark else R.string.add_bookmark)
+        m.iconReload.setImageResource(if (current.loading) R.drawable.ic_close else R.drawable.ic_refresh)
+        m.iconReload.contentDescription = getString(if (current.loading) R.string.stop else R.string.reload)
+        m.desktopSwitch.isChecked = prefs.getBoolean(Prefs.DESKTOP, false)
+
+        fun close(action: () -> Unit) {
+            m.card.animate().alpha(0f).scaleX(0.9f).scaleY(0.9f).setDuration(Motion.SHORT)
+                .setInterpolator(Motion.accelerate).withEndAction {
+                    popup.dismiss()
+                    action()
+                }.start()
+        }
+
+        fun bind(view: View, action: () -> Unit) {
+            view.setOnClickListener { close(action) }
+        }
+
+        listOf(m.iconBack, m.iconForward, m.iconBookmark, m.iconReload).forEach { it.pressable() }
+        bind(m.iconBack) { web.goBack() }
+        bind(m.iconForward) { web.goForward() }
+        bind(m.iconBookmark) { toggleBookmark() }
+        bind(m.iconReload) { if (current.loading) web.stopLoading() else web.reload() }
+        bind(m.rowNewTab) { newTab(HOME) }
+        bind(m.rowFind) { openFind() }
+        bind(m.rowShare) { share() }
+        bind(m.rowBookmarks) { showBookmarks() }
+        bind(m.rowSettings) {
+            val options = ActivityOptions.makeCustomAnimation(this, R.anim.enter_from_right, R.anim.exit_to_left)
+            startActivity(Intent(this, SettingsActivity::class.java), options.toBundle())
+        }
+        m.rowDesktop.setOnClickListener {
+            m.desktopSwitch.toggle()
+            m.root.postDelayed({ close { toggleDesktop() } }, 170)
+        }
+
+        val items = listOf<View>(
+            m.iconRow, m.rowNewTab, m.rowFind, m.rowShare, m.rowBookmarks, m.rowDesktop, m.rowSettings,
+        )
+        m.card.doOnLayout { card ->
+            card.pivotX = card.width.toFloat()
+            card.pivotY = 0f
+            card.alpha = 0f
+            card.scaleX = 0.8f
+            card.scaleY = 0.8f
+            card.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(Motion.MEDIUM)
+                .setInterpolator(Motion.decelerate).start()
+            items.forEachIndexed { i, item ->
+                item.alpha = 0f
+                item.translationY = dp(8).toFloat()
+                item.animate().alpha(1f).translationY(0f).setStartDelay(50L + i * 28L)
+                    .setDuration(220).setInterpolator(Motion.decelerate).start()
             }
-            setOnMenuItemClickListener { item ->
-                when (item.itemId) {
-                    R.id.action_new_tab -> newBlankTab()
-                    R.id.action_back -> web.goBack()
-                    R.id.action_forward -> web.goForward()
-                    R.id.action_reload -> if (current.loading) web.stopLoading() else web.reload()
-                    R.id.action_bookmark -> toggleBookmark()
-                    R.id.action_bookmarks -> showBookmarks()
-                    R.id.action_find -> openFind()
-                    R.id.action_share -> share()
-                    R.id.action_desktop -> {
-                        prefs.edit { putBoolean(Prefs.DESKTOP, !item.isChecked) }
-                        tabs.forEach(::applySettings)
-                        web.reload()
-                    }
-                    R.id.action_settings -> startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
-                }
-                true
-            }
-            show()
+        }
+        popup.showAsDropDown(ui.menu, 0, -dp(4), Gravity.END)
+    }
+
+    private fun View.enable(on: Boolean) {
+        isEnabled = on
+        alpha = if (on) 1f else 0.38f
+    }
+
+    private fun toggleDesktop() {
+        prefs.edit { putBoolean(Prefs.DESKTOP, !prefs.getBoolean(Prefs.DESKTOP, false)) }
+        tabs.forEach(::applySettings)
+        web.reload()
+    }
+
+    private fun toggleBookmark() {
+        val url = web.url ?: return
+        if (Bookmarks.contains(this, url)) {
+            Bookmarks.remove(this, url)
+            notify(R.string.bookmark_removed)
+        } else {
+            Bookmarks.add(this, titleOf(current), url)
+            notify(R.string.bookmark_added)
         }
     }
 
     private fun openFind() {
-        ui.findBar.isVisible = true
+        if (!ui.findBar.isVisible) {
+            ui.findBar.isVisible = true
+            ui.findBar.alpha = 0f
+            ui.findBar.translationY = dp(24).toFloat()
+            ui.findBar.animate().alpha(1f).translationY(0f).setDuration(Motion.MEDIUM)
+                .setInterpolator(Motion.decelerate).start()
+        }
         ui.findInput.requestFocus()
         getSystemService(InputMethodManager::class.java).showSoftInput(ui.findInput, 0)
     }
@@ -518,74 +744,22 @@ class MainActivity : AppCompatActivity() {
         web.clearMatches()
         ui.findInput.text?.clear()
         ui.findCount.text = ""
-        ui.findBar.isGone = true
         hideKeyboard(ui.findInput)
-    }
-
-    private fun newBlankTab() {
-        newTab(null)
-        focusUrlBar()
-    }
-
-    private fun focusUrlBar() {
-        ui.urlBar.requestFocus()
-        getSystemService(InputMethodManager::class.java).showSoftInput(ui.urlBar, 0)
+        ui.findBar.animate().alpha(0f).translationY(dp(24).toFloat()).setDuration(Motion.SHORT)
+            .setInterpolator(Motion.accelerate).withEndAction { ui.findBar.isGone = true }.start()
     }
 
     private fun exitFullscreen() {
         val view = customView ?: return
-        ui.fullscreen.removeView(view)
-        ui.fullscreen.isGone = true
         customView = null
+        ui.fullscreen.animate().alpha(0f).setDuration(Motion.SHORT).withEndAction {
+            ui.fullscreen.removeView(view)
+            ui.fullscreen.isGone = true
+        }.start()
         customCallback?.onCustomViewHidden()
         customCallback = null
         WindowCompat.getInsetsController(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
     }
-
-    private fun toggleBookmark() {
-        val url = web.url ?: return
-        if (Bookmarks.contains(this, url)) Bookmarks.remove(this, url)
-        else Bookmarks.add(this, titleOf(current), url)
-    }
-
-    private fun showBookmarks() {
-        val sheet = BottomSheetDialog(this)
-        val content = layoutInflater.inflate(R.layout.sheet_tabs, null)
-        content.findViewById<TextView>(R.id.sheetTitle).setText(R.string.bookmarks)
-        content.findViewById<View>(R.id.newTab).isGone = true
-        val list = content.findViewById<LinearLayout>(R.id.tabList)
-
-        fun fill() {
-            list.removeAllViews()
-            val items = Bookmarks.all(this)
-            if (items.isEmpty()) {
-                list.addView(TextView(this).apply {
-                    setText(R.string.empty_bookmarks)
-                    setTextColor(getColor(R.color.muted))
-                    setPadding(dp(24), dp(12), dp(24), dp(12))
-                })
-            }
-            for (item in items) {
-                val row = layoutInflater.inflate(R.layout.item_tab, list, false)
-                row.findViewById<TextView>(R.id.tabTitle).text = item.title.ifBlank { item.url }
-                row.setOnClickListener {
-                    open(item.url)
-                    sheet.dismiss()
-                }
-                row.findViewById<View>(R.id.tabClose).setOnClickListener {
-                    Bookmarks.remove(this, item.url)
-                    fill()
-                }
-                list.addView(row)
-            }
-        }
-
-        fill()
-        sheet.setContentView(content)
-        sheet.show()
-    }
-
-    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     private fun share() {
         val url = web.url ?: return
@@ -597,6 +771,8 @@ class MainActivity : AppCompatActivity() {
         getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(view.windowToken, 0)
     }
 
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+
     private fun display(url: String?): String {
         if (url.isNullOrEmpty()) return ""
         return Uri.parse(url).host?.removePrefix("www.") ?: url
@@ -604,6 +780,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showUrl(url: String?) {
         if (!ui.urlBar.hasFocus()) ui.urlBar.setText(display(url))
+        updateSiteIcon(url)
     }
 
     private fun setLoading(tab: Tab, on: Boolean) {
@@ -617,7 +794,8 @@ class MainActivity : AppCompatActivity() {
             ui.progress.alpha = 1f
             ui.progress.isVisible = true
         } else {
-            ui.progress.animate().alpha(0f).setDuration(200).withEndAction { ui.progress.isGone = true }.start()
+            ui.progress.animate().alpha(0f).setDuration(260).setStartDelay(120)
+                .withEndAction { ui.progress.isGone = true }.start()
         }
     }
 
@@ -626,6 +804,7 @@ class MainActivity : AppCompatActivity() {
     // endregion
 
     private companion object {
+        const val HOME = "https://www.google.com"
         const val DESKTOP_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         val PRIVATE_IP = Regex("^(127\\.|10\\.|192\\.168\\.|169\\.254\\.|172\\.(1[6-9]|2\\d|3[01])\\.)")

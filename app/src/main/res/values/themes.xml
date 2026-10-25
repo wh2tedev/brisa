@@ -12,6 +12,16 @@
         <item name="android:navigationBarColor">@color/toolbar</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
+        <item name="bottomSheetDialogTheme">@style/BrisaSheetDialog</item>
+    </style>
+
+    <style name="BrisaSheetDialog" parent="ThemeOverlay.Material3.BottomSheetDialog">
+        <item name="bottomSheetStyle">@style/BrisaSheet</item>
+        <item name="android:navigationBarColor">@color/popup</item>
+    </style>
+
+    <style name="BrisaSheet" parent="Widget.Material3.BottomSheet.Modal">
+        <item name="backgroundTint">@color/popup</item>
     </style>
 
     <style name="IconButton">
@@ -19,5 +29,17 @@
         <item name="android:layout_height">44dp</item>
         <item name="android:background">?attr/selectableItemBackgroundBorderless</item>
         <item name="android:tint">@color/on_bg</item>
+    </style>
+
+    <style name="MenuRow">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">48dp</item>
+        <item name="android:background">?attr/selectableItemBackground</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:paddingHorizontal">20dp</item>
+        <item name="android:textColor">@color/on_bg</item>
+        <item name="android:textSize">15sp</item>
     </style>
 </resources>
