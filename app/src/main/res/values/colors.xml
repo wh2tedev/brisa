@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#202124</color>
+    <color name="toolbar">#35363A</color>
+    <color name="field">#202124</color>
+    <color name="on_bg">#E8EAED</color>
+    <color name="muted">#9AA0A6</color>
+    <color name="accent">#8AB4F8</color>
+    <color name="on_accent">#202124</color>
+</resources>

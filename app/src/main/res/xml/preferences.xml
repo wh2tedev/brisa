@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
+    <PreferenceCategory app:title="@string/cat_privacy" app:iconSpaceReserved="false">
+        <SwitchPreferenceCompat
+            app:key="block_third_party"
+            app:defaultValue="true"
+            app:title="@string/pref_third_party"
+            app:summary="@string/pref_third_party_sum"
+            app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat
+            app:key="send_dnt"
+            app:defaultValue="true"
+            app:title="@string/pref_dnt"
+            app:summary="@string/pref_dnt_sum"
+            app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat
+            app:key="clear_on_exit"
+            app:defaultValue="false"
+            app:title="@string/pref_clear_exit"
+            app:summary="@string/pref_clear_exit_sum"
+            app:iconSpaceReserved="false" />
+        <Preference
+            app:key="clear_now"
+            app:title="@string/pref_clear_now"
+            app:summary="@string/pref_clear_now_sum"
+            app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+    <PreferenceCategory app:title="@string/cat_content" app:iconSpaceReserved="false">
+        <SwitchPreferenceCompat
+            app:key="javascript"
+            app:defaultValue="true"
+            app:title="@string/pref_js"
+            app:summary="@string/pref_js_sum"
+            app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+</PreferenceScreen>
