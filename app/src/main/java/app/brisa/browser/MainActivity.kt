@@ -1,11 +1,14 @@
 package app.brisa.browser
 
 import android.app.DownloadManager
-import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.graphics.Bitmap
 import android.net.Uri
+import android.net.http.SslError
+import android.os.Bundle
 import android.os.Environment
+import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -22,24 +25,38 @@ import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.net.http.SslError
-import android.os.Bundle
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.PopupMenu
+import android.widget.TextView
 import androidx.activity.addCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.edit
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
+import androidx.core.widget.doOnTextChanged
 import androidx.preference.PreferenceManager
 import app.brisa.browser.databinding.ActivityMainBinding
+import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.snackbar.Snackbar
 
 class MainActivity : AppCompatActivity() {
 
+    private class Tab(val web: WebView) {
+        var title = ""
+        var loading = false
+        var progress = 0
+        var upgradedUrl: String? = null
+        var fallbackUrl: String? = null
+    }
+
     private lateinit var ui: ActivityMainBinding
     private lateinit var prefs: SharedPreferences
     private val defaultUa by lazy { WebSettings.getDefaultUserAgent(this) }
-    private var loading = false
+    private val tabs = mutableListOf<Tab>()
+    private lateinit var current: Tab
+    private val web get() = current.web
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -47,26 +64,20 @@ class MainActivity : AppCompatActivity() {
         setContentView(ui.root)
         prefs = PreferenceManager.getDefaultSharedPreferences(this)
 
-        setupWebView()
         setupBars()
-        applySettings()
-
-        onBackPressedDispatcher.addCallback(this) {
-            if (ui.web.canGoBack()) ui.web.goBack() else finish()
-        }
-
-        if (savedInstanceState == null) open(externalUrl(intent) ?: HOME)
+        onBackPressedDispatcher.addCallback(this) { goBack() }
+        newTab(externalUrl(intent) ?: HOME)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        externalUrl(intent)?.let(::open)
+        externalUrl(intent)?.let(::newTab)
     }
 
     override fun onResume() {
         super.onResume()
-        ui.web.onResume()
-        applySettings()
+        web.onResume()
+        tabs.forEach(::applySettings)
         if (prefs.getBoolean(Prefs.PENDING_CLEAR, false)) {
             prefs.edit { remove(Prefs.PENDING_CLEAR) }
             clearData()
@@ -74,20 +85,114 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
-        ui.web.onPause()
+        web.onPause()
         CookieManager.getInstance().flush()
         super.onPause()
     }
 
     override fun onDestroy() {
         if (isFinishing && prefs.getBoolean(Prefs.CLEAR_ON_EXIT, false)) clearData()
-        (ui.web.parent as? ViewGroup)?.removeView(ui.web)
-        ui.web.destroy()
+        tabs.toList().forEach(::destroy)
+        tabs.clear()
         super.onDestroy()
     }
 
-    private fun setupWebView() {
-        ui.web.settings.apply {
+    // region tabs
+
+    private fun newTab(url: String) {
+        val tab = Tab(WebView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+        })
+        configure(tab)
+        tabs += tab
+        select(tab)
+        open(url, tab)
+    }
+
+    private fun select(tab: Tab) {
+        closeFind()
+        current = tab
+        ui.webContainer.removeAllViews()
+        ui.webContainer.addView(tab.web)
+        ui.urlBar.clearFocus()
+        showUrl(tab.web.url)
+        ui.progress.setProgressCompat(tab.progress, false)
+        renderLoading()
+        updateTabCount()
+    }
+
+    private fun closeTab(tab: Tab) {
+        val index = tabs.indexOf(tab)
+        if (index < 0) return
+        tabs.removeAt(index)
+        if (tabs.isEmpty()) newTab(HOME)
+        else if (tab === current) select(tabs[minOf(index, tabs.lastIndex)])
+        destroy(tab)
+        updateTabCount()
+    }
+
+    private fun destroy(tab: Tab) {
+        (tab.web.parent as? ViewGroup)?.removeView(tab.web)
+        tab.web.destroy()
+    }
+
+    private fun goBack() {
+        when {
+            ui.findBar.isVisible -> closeFind()
+            web.canGoBack() -> web.goBack()
+            tabs.size > 1 -> closeTab(current)
+            else -> finish()
+        }
+    }
+
+    private fun updateTabCount() {
+        ui.tabCount.text = tabs.size.toString()
+    }
+
+    private fun titleOf(tab: Tab): String =
+        tab.title.ifBlank { display(tab.web.url) }.ifBlank { getString(R.string.new_tab) }
+
+    private fun showTabs() {
+        val sheet = BottomSheetDialog(this)
+        val content = layoutInflater.inflate(R.layout.sheet_tabs, null)
+        val list = content.findViewById<LinearLayout>(R.id.tabList)
+
+        fun fill() {
+            list.removeAllViews()
+            for (tab in tabs.toList()) {
+                val row = layoutInflater.inflate(R.layout.item_tab, list, false)
+                row.findViewById<TextView>(R.id.tabTitle).text = titleOf(tab)
+                if (tab === current) row.setBackgroundColor(getColor(R.color.toolbar))
+                row.setOnClickListener {
+                    select(tab)
+                    sheet.dismiss()
+                }
+                row.findViewById<View>(R.id.tabClose).setOnClickListener {
+                    closeTab(tab)
+                    fill()
+                }
+                list.addView(row)
+            }
+        }
+
+        content.findViewById<View>(R.id.newTab).setOnClickListener {
+            newTab(HOME)
+            sheet.dismiss()
+        }
+        fill()
+        sheet.setContentView(content)
+        sheet.show()
+    }
+
+    // endregion
+
+    // region web view
+
+    private fun configure(tab: Tab) {
+        tab.web.settings.apply {
             domStorageEnabled = true
             allowFileAccess = false
             allowContentAccess = false
@@ -99,52 +204,64 @@ class MainActivity : AppCompatActivity() {
             setGeolocationEnabled(false)
             setSafeBrowsingEnabled(true)
         }
+        applySettings(tab)
 
-        ui.web.webViewClient = object : WebViewClient() {
+        tab.web.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val uri = request.url
                 return when (uri.scheme) {
                     "https" -> false
                     "http" -> {
-                        if (request.isForMainFrame) open(uri.buildUpon().scheme("https").build().toString())
-                        true
+                        if (request.isForMainFrame && !request.isRedirect && shouldUpgrade(uri)) {
+                            open(uri.toString(), tab)
+                            true
+                        } else false
                     }
                     else -> true
                 }
             }
 
-            override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
-                setLoading(true)
-                showUrl(url)
+            override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                tab.title = ""
+                setLoading(tab, true)
+                if (tab === current) showUrl(url)
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
-                setLoading(false)
-                showUrl(url)
-            }
-
-            override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
-                updateNav()
+                setLoading(tab, false)
+                if (tab === current) showUrl(url)
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                if (request.isForMainFrame) notify(R.string.load_error)
+                if (!request.isForMainFrame) return
+                val fallback = tab.fallbackUrl
+                if (fallback != null && request.url.toString() == tab.upgradedUrl) {
+                    tab.fallbackUrl = null
+                    view.loadUrl(fallback, headers())
+                } else if (tab === current) {
+                    notify(R.string.load_error)
+                }
             }
 
             override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
                 handler.cancel()
-                notify(R.string.ssl_error)
+                if (tab === current) notify(R.string.ssl_error)
             }
 
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
-                recreate()
+                closeTab(tab)
                 return true
             }
         }
 
-        ui.web.webChromeClient = object : WebChromeClient() {
+        tab.web.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView, newProgress: Int) {
-                ui.progress.setProgressCompat(newProgress, true)
+                tab.progress = newProgress
+                if (tab === current) ui.progress.setProgressCompat(newProgress, true)
+            }
+
+            override fun onReceivedTitle(view: WebView, title: String?) {
+                tab.title = title.orEmpty()
             }
 
             override fun onPermissionRequest(request: PermissionRequest) = request.deny()
@@ -155,8 +272,14 @@ class MainActivity : AppCompatActivity() {
             ) = callback.invoke(origin, false, false)
         }
 
-        ui.web.setDownloadListener { url, userAgent, disposition, mime, _ ->
-            if (!url.startsWith("https://")) return@setDownloadListener
+        tab.web.setFindListener { active, matches, done ->
+            if (done && tab === current) {
+                ui.findCount.text = if (matches == 0) "0/0" else "${active + 1}/$matches"
+            }
+        }
+
+        tab.web.setDownloadListener { url, userAgent, disposition, mime, _ ->
+            if (!url.startsWith("https://") && !url.startsWith("http://")) return@setDownloadListener
             val request = DownloadManager.Request(Uri.parse(url))
                 .setMimeType(mime)
                 .addRequestHeader("User-Agent", userAgent)
@@ -171,61 +294,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun setupBars() {
-        ui.urlBar.setOnEditorActionListener { v, action, _ ->
-            if (action == EditorInfo.IME_ACTION_GO) {
-                open(resolve(v.text.toString()))
-                v.clearFocus()
-                getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(v.windowToken, 0)
-                true
-            } else false
-        }
-        ui.urlBar.setOnFocusChangeListener { v, focused ->
-            val field = v as android.widget.EditText
-            if (focused) {
-                field.setText(ui.web.url.orEmpty())
-                field.selectAll()
-            } else {
-                field.setText(display(ui.web.url))
-            }
-        }
-
-        ui.back.setOnClickListener { ui.web.goBack() }
-        ui.forward.setOnClickListener { ui.web.goForward() }
-        ui.reload.setOnClickListener { if (loading) ui.web.stopLoading() else ui.web.reload() }
-        ui.menu.setOnClickListener { showMenu() }
-        updateNav()
-    }
-
-    private fun showMenu() {
-        PopupMenu(this, ui.menu).apply {
-            menuInflater.inflate(R.menu.main, menu)
-            menu.findItem(R.id.action_desktop).isChecked = prefs.getBoolean(Prefs.DESKTOP, false)
-            setOnMenuItemClickListener { item ->
-                when (item.itemId) {
-                    R.id.action_share -> share()
-                    R.id.action_desktop -> {
-                        prefs.edit { putBoolean(Prefs.DESKTOP, !item.isChecked) }
-                        applySettings()
-                        ui.web.reload()
-                    }
-                    R.id.action_settings -> startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
-                }
-                true
-            }
-            show()
-        }
-    }
-
-    private fun share() {
-        val url = ui.web.url ?: return
-        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, url)
-        startActivity(Intent.createChooser(send, null))
-    }
-
-    private fun applySettings() {
+    private fun applySettings(tab: Tab) {
         val desktop = prefs.getBoolean(Prefs.DESKTOP, false)
-        ui.web.settings.apply {
+        tab.web.settings.apply {
             javaScriptEnabled = prefs.getBoolean(Prefs.JAVASCRIPT, true)
             userAgentString = if (desktop) DESKTOP_UA else defaultUa
             useWideViewPort = desktop
@@ -233,32 +304,58 @@ class MainActivity : AppCompatActivity() {
         }
         CookieManager.getInstance().apply {
             setAcceptCookie(true)
-            setAcceptThirdPartyCookies(ui.web, !prefs.getBoolean(Prefs.BLOCK_THIRD_PARTY, true))
+            setAcceptThirdPartyCookies(tab.web, !prefs.getBoolean(Prefs.BLOCK_THIRD_PARTY, true))
         }
     }
 
     private fun clearData() {
-        ui.web.clearCache(true)
-        ui.web.clearHistory()
+        current.web.clearCache(true)
+        tabs.forEach { it.web.clearHistory() }
         WebStorage.getInstance().deleteAllData()
         CookieManager.getInstance().apply {
             removeAllCookies(null)
             flush()
         }
-        updateNav()
     }
 
-    private fun open(url: String) {
-        val safe = if (url.startsWith("http://", ignoreCase = true)) "https://" + url.substring(7) else url
-        val headers = if (prefs.getBoolean(Prefs.SEND_DNT, true)) mapOf("DNT" to "1", "Sec-GPC" to "1") else emptyMap()
-        ui.web.loadUrl(safe, headers)
+    // endregion
+
+    // region navigation
+
+    private fun headers(): Map<String, String> =
+        if (prefs.getBoolean(Prefs.SEND_DNT, true)) mapOf("DNT" to "1", "Sec-GPC" to "1") else emptyMap()
+
+    private fun shouldUpgrade(uri: Uri) =
+        prefs.getBoolean(Prefs.HTTPS_FIRST, true) && !isPrivateHost(uri.host)
+
+    private fun open(url: String, tab: Tab = current) {
+        val uri = Uri.parse(url)
+        tab.fallbackUrl = null
+        tab.upgradedUrl = null
+        var target = url
+        if (uri.scheme == "http" && shouldUpgrade(uri)) {
+            target = uri.buildUpon().scheme("https").build().toString()
+            tab.upgradedUrl = target
+            tab.fallbackUrl = url
+        }
+        tab.web.loadUrl(target, headers())
+    }
+
+    private fun isPrivateHost(host: String?): Boolean {
+        val h = host?.lowercase() ?: return false
+        return '.' !in h || h.endsWith(".local") || h.endsWith(".localhost") || PRIVATE_IP.containsMatchIn(h)
     }
 
     private fun resolve(input: String): String {
         val text = input.trim()
+        if (text.startsWith("https://", true) || text.startsWith("http://", true)) return text
+        if ("://" in text || ' ' in text) return searchUrl(text)
+        val host = runCatching { Uri.parse("http://$text").host }.getOrNull()?.lowercase()
         return when {
-            text.startsWith("https://", true) || text.startsWith("http://", true) -> text
-            "://" in text || ' ' in text || '.' !in text -> searchUrl(text)
+            host.isNullOrEmpty() -> searchUrl(text)
+            host == "localhost" || host.startsWith("[") -> "http://$text"
+            '.' !in host -> searchUrl(text)
+            isPrivateHost(host) -> "http://$text"
             else -> "https://$text"
         }
     }
@@ -277,6 +374,101 @@ class MainActivity : AppCompatActivity() {
         return data.takeIf { it.scheme == "https" || it.scheme == "http" }?.toString()
     }
 
+    // endregion
+
+    // region ui
+
+    private fun setupBars() {
+        ui.urlBar.setOnEditorActionListener { v, action, _ ->
+            if (action == EditorInfo.IME_ACTION_GO) {
+                open(resolve(v.text.toString()))
+                v.clearFocus()
+                hideKeyboard(v)
+                true
+            } else false
+        }
+        ui.urlBar.setOnFocusChangeListener { v, focused ->
+            val field = v as EditText
+            if (focused) {
+                field.setText(web.url.orEmpty())
+                field.selectAll()
+            } else {
+                field.setText(display(web.url))
+            }
+        }
+        ui.tabsButton.setOnClickListener { showTabs() }
+        ui.menu.setOnClickListener { showMenu() }
+
+        ui.findInput.doOnTextChanged { text, _, _, _ ->
+            if (text.isNullOrEmpty()) {
+                web.clearMatches()
+                ui.findCount.text = ""
+            } else {
+                web.findAllAsync(text.toString())
+            }
+        }
+        ui.findInput.setOnEditorActionListener { _, action, _ ->
+            if (action == EditorInfo.IME_ACTION_SEARCH) web.findNext(true)
+            true
+        }
+        ui.findNext.setOnClickListener { web.findNext(true) }
+        ui.findPrev.setOnClickListener { web.findNext(false) }
+        ui.findClose.setOnClickListener { closeFind() }
+    }
+
+    private fun showMenu() {
+        PopupMenu(this, ui.menu).apply {
+            menuInflater.inflate(R.menu.main, menu)
+            menu.findItem(R.id.action_back).isEnabled = web.canGoBack()
+            menu.findItem(R.id.action_forward).isEnabled = web.canGoForward()
+            menu.findItem(R.id.action_reload).setTitle(if (current.loading) R.string.stop else R.string.reload)
+            menu.findItem(R.id.action_desktop).isChecked = prefs.getBoolean(Prefs.DESKTOP, false)
+            setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    R.id.action_new_tab -> newTab(HOME)
+                    R.id.action_back -> web.goBack()
+                    R.id.action_forward -> web.goForward()
+                    R.id.action_reload -> if (current.loading) web.stopLoading() else web.reload()
+                    R.id.action_find -> openFind()
+                    R.id.action_share -> share()
+                    R.id.action_desktop -> {
+                        prefs.edit { putBoolean(Prefs.DESKTOP, !item.isChecked) }
+                        tabs.forEach(::applySettings)
+                        web.reload()
+                    }
+                    R.id.action_settings -> startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
+                }
+                true
+            }
+            show()
+        }
+    }
+
+    private fun openFind() {
+        ui.findBar.isVisible = true
+        ui.findInput.requestFocus()
+        getSystemService(InputMethodManager::class.java).showSoftInput(ui.findInput, 0)
+    }
+
+    private fun closeFind() {
+        if (!ui.findBar.isVisible) return
+        web.clearMatches()
+        ui.findInput.text?.clear()
+        ui.findCount.text = ""
+        ui.findBar.isGone = true
+        hideKeyboard(ui.findInput)
+    }
+
+    private fun share() {
+        val url = web.url ?: return
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, url)
+        startActivity(Intent.createChooser(send, null))
+    }
+
+    private fun hideKeyboard(view: View) {
+        getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(view.windowToken, 0)
+    }
+
     private fun display(url: String?): String {
         if (url.isNullOrEmpty()) return ""
         return Uri.parse(url).host?.removePrefix("www.") ?: url
@@ -286,34 +478,29 @@ class MainActivity : AppCompatActivity() {
         if (!ui.urlBar.hasFocus()) ui.urlBar.setText(display(url))
     }
 
-    private fun setLoading(on: Boolean) {
-        loading = on
+    private fun setLoading(tab: Tab, on: Boolean) {
+        tab.loading = on
+        if (tab === current) renderLoading()
+    }
+
+    private fun renderLoading() {
         ui.progress.animate().cancel()
-        if (on) {
+        if (current.loading) {
             ui.progress.alpha = 1f
             ui.progress.isVisible = true
         } else {
             ui.progress.animate().alpha(0f).setDuration(200).withEndAction { ui.progress.isGone = true }.start()
         }
-        ui.reload.setImageResource(if (on) R.drawable.ic_close else R.drawable.ic_refresh)
-        ui.reload.contentDescription = getString(if (on) R.string.stop else R.string.reload)
-    }
-
-    private fun updateNav() {
-        fade(ui.back, ui.web.canGoBack())
-        fade(ui.forward, ui.web.canGoForward())
-    }
-
-    private fun fade(button: android.view.View, enabled: Boolean) {
-        button.isEnabled = enabled
-        button.animate().alpha(if (enabled) 1f else 0.38f).setDuration(150).start()
     }
 
     private fun notify(message: Int) = Snackbar.make(ui.root, message, Snackbar.LENGTH_SHORT).show()
+
+    // endregion
 
     private companion object {
         const val HOME = "https://www.google.com"
         const val DESKTOP_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        val PRIVATE_IP = Regex("^(127\\.|10\\.|192\\.168\\.|169\\.254\\.|172\\.(1[6-9]|2\\d|3[01])\\.)")
     }
 }

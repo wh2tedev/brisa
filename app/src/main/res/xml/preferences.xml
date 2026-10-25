@@ -2,6 +2,12 @@
 <PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
     <PreferenceCategory app:title="@string/cat_privacy" app:iconSpaceReserved="false">
         <SwitchPreferenceCompat
+            app:key="https_first"
+            app:defaultValue="true"
+            app:title="@string/pref_https_first"
+            app:summary="@string/pref_https_first_sum"
+            app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat
             app:key="block_third_party"
             app:defaultValue="true"
             app:title="@string/pref_third_party"

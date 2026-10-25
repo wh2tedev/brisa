@@ -11,13 +11,17 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="@color/toolbar"
-        android:paddingHorizontal="12dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="4dp"
         android:paddingVertical="8dp">
 
         <EditText
             android:id="@+id/urlBar"
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="44dp"
+            android:layout_weight="1"
             android:background="@drawable/bg_omnibox"
             android:hint="@string/url_hint"
             android:importantForAutofill="no"
@@ -30,6 +34,32 @@
             android:textColorHint="@color/muted"
             android:textCursorDrawable="@null"
             android:textSize="15sp" />
+
+        <FrameLayout
+            android:id="@+id/tabsButton"
+            style="@style/IconButton"
+            android:clickable="true"
+            android:contentDescription="@string/tabs"
+            android:focusable="true">
+
+            <TextView
+                android:id="@+id/tabCount"
+                android:layout_width="26dp"
+                android:layout_height="26dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_tab_count"
+                android:gravity="center"
+                android:text="1"
+                android:textColor="@color/on_bg"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </FrameLayout>
+
+        <ImageButton
+            android:id="@+id/menu"
+            style="@style/IconButton"
+            android:contentDescription="@string/more"
+            android:src="@drawable/ic_more_vert" />
     </LinearLayout>
 
     <com.google.android.material.progressindicator.LinearProgressIndicator
@@ -41,40 +71,62 @@
         app:trackColor="@color/toolbar"
         app:trackThickness="2dp" />
 
-    <WebView
-        android:id="@+id/web"
+    <FrameLayout
+        android:id="@+id/webContainer"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1" />
 
     <LinearLayout
+        android:id="@+id/findBar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="wrap_content"
         android:background="@color/toolbar"
-        android:orientation="horizontal">
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="20dp"
+        android:paddingEnd="4dp"
+        android:visibility="gone">
+
+        <EditText
+            android:id="@+id/findInput"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:background="@null"
+            android:hint="@string/find_hint"
+            android:importantForAutofill="no"
+            android:imeOptions="actionSearch"
+            android:inputType="text"
+            android:maxLines="1"
+            android:textColor="@color/on_bg"
+            android:textColorHint="@color/muted"
+            android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/findCount"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="8dp"
+            android:textColor="@color/muted"
+            android:textSize="13sp" />
 
         <ImageButton
-            android:id="@+id/back"
-            style="@style/NavButton"
-            android:contentDescription="@string/back"
-            android:src="@drawable/ic_arrow_back" />
+            android:id="@+id/findPrev"
+            style="@style/IconButton"
+            android:contentDescription="@string/find_previous"
+            android:src="@drawable/ic_arrow_up" />
 
         <ImageButton
-            android:id="@+id/forward"
-            style="@style/NavButton"
-            android:contentDescription="@string/forward"
-            android:src="@drawable/ic_arrow_forward" />
+            android:id="@+id/findNext"
+            style="@style/IconButton"
+            android:contentDescription="@string/find_next"
+            android:src="@drawable/ic_arrow_down" />
 
         <ImageButton
-            android:id="@+id/reload"
-            style="@style/NavButton"
-            android:contentDescription="@string/reload"
-            android:src="@drawable/ic_refresh" />
-
-        <ImageButton
-            android:id="@+id/menu"
-            style="@style/NavButton"
-            android:contentDescription="@string/more"
-            android:src="@drawable/ic_more_vert" />
+            android:id="@+id/findClose"
+            style="@style/IconButton"
+            android:contentDescription="@string/close"
+            android:src="@drawable/ic_close" />
     </LinearLayout>
 </LinearLayout>

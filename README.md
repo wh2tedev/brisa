@@ -1,36 +1,55 @@
 # Brisa
 
-Navegador Android mínimo basado en `WebView`, con Material 3 y tema oscuro al estilo Chrome.
-Buscador por defecto: Google. Sin analíticas, sin cuentas, sin servicios de terceros.
+A minimal Android browser built on `WebView`, with Material 3 and a Chrome-style dark theme.
+Google is the default search engine. No analytics, no accounts, no third-party services.
 
-## Compilar
+## Features
 
-Requisitos: JDK 17 y Android SDK 34.
+- Multiple tabs with a bottom-sheet tab switcher
+- Find in page
+- Desktop site mode
+- Downloads through the system download manager
+- Opens `http` and `https` links from other apps
 
-- **Android Studio:** abrir la carpeta y pulsar *Run*.
-- **Terminal:** `gradle assembleDebug` (Gradle 8.7). El APK queda en `app/build/outputs/apk/debug/`.
-- **GitHub Actions:** el workflow `build.yml` compila y sube el APK como artefacto.
+## Building
 
-Para generar el wrapper: `gradle wrapper --gradle-version 8.7`.
+Requirements: JDK 17 and Android SDK 34.
 
-## Privacidad y seguridad
+- **Android Studio:** open the project folder and press *Run*.
+- **Command line:** `gradle assembleDebug` (Gradle 8.7). The APK is written to `app/build/outputs/apk/debug/`.
+- **GitHub Actions:** `.github/workflows/build.yml` builds the APK and uploads it as an artifact.
 
-- Solo HTTPS: `http://` se mejora a `https://` y el tráfico en claro está prohibido (`usesCleartextTraffic=false`).
-- Errores de certificado: la carga se cancela, sin opción de continuar.
-- Safe Browsing activado; contenido mixto bloqueado.
-- Acceso a archivos locales y a content providers desactivado.
-- Cookies de terceros bloqueadas por defecto.
-- Cabeceras `DNT` y `Sec-GPC` en la navegación principal (configurable).
-- Permisos web (cámara, micrófono, ubicación) siempre denegados.
-- Esquemas no web (`intent:`, `file:`, `javascript:`…) bloqueados en navegación.
-- Sin historial persistente propio, sin copias de seguridad (`allowBackup=false`).
-- Opción para borrar datos al cerrar y para borrarlos ahora.
-- Único permiso: `INTERNET`.
+To generate the Gradle wrapper: `gradle wrapper --gradle-version 8.7`.
 
-## Limitaciones actuales
+## HTTP, HTTPS and local development
 
-Una sola pestaña, sin subida de archivos, sin marcadores ni pestañas privadas.
+Cleartext traffic is allowed so that `localhost`, LAN addresses and dev servers work.
 
-## Licencia
+- Typing `localhost:3000`, `192.168.1.10:8080` or `myhost.local` opens it over HTTP.
+- Other addresses typed without a scheme open over HTTPS.
+- With **Try HTTPS first** enabled (default), `http://` links to public sites are upgraded to HTTPS,
+  falling back to HTTP only if the connection fails. Certificate errors never fall back.
+- Local and private addresses (`localhost`, `127.x`, `10.x`, `192.168.x`, `172.16–31.x`,
+  `*.local`, single-label hostnames) are never upgraded.
+- Mixed content (HTTP resources on HTTPS pages) is always blocked.
+
+## Privacy and security
+
+- Certificate errors cancel the load, with no option to proceed.
+- Safe Browsing enabled; local file and content provider access disabled.
+- Third-party cookies blocked by default.
+- `DNT` and `Sec-GPC` headers on top-level navigation (configurable).
+- Web permissions (camera, microphone, location) are always denied.
+- Non-web schemes (`intent:`, `file:`, `javascript:`, …) are blocked during navigation.
+- No browsing history is stored by the app and backups are disabled.
+- Clear data on exit, or on demand.
+- The only permission requested is `INTERNET`.
+
+## Not yet implemented
+
+Bookmarks, file uploads, release signing. Private tabs are not possible with a plain `WebView`,
+which shares a single cookie store across the whole app.
+
+## License
 
 MIT
