@@ -2,9 +2,10 @@ package app.brisa.browser
 
 import android.animation.LayoutTransition
 import android.animation.ValueAnimator
-import android.content.ContentValues
 import android.os.Build
-import android.provider.MediaStore
+import android.content.res.Configuration
+import androidx.core.graphics.ColorUtils
+import java.io.File
 import android.text.format.Formatter
 import android.util.Base64
 import android.webkit.WebResourceResponse
@@ -80,6 +81,7 @@ class MainActivity : AppCompatActivity() {
         var upgradedUrl: String? = null
         var fallbackUrl: String? = null
         var pendingUrl: String? = null
+        var favicon: Bitmap? = null
     }
 
     private lateinit var ui: ActivityMainBinding
@@ -105,6 +107,10 @@ class MainActivity : AppCompatActivity() {
         },
     )
 
+    private val folderPicker = FolderPicker(this)
+    private var appearanceSig = ""
+    private var toolbarBottom = false
+
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var customView: View? = null
     private var customCallback: WebChromeClient.CustomViewCallback? = null
@@ -115,12 +121,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        Appearance.beforeCreate(this)
         super.onCreate(savedInstanceState)
+        Appearance.apply(this)
+        appearanceSig = Appearance.signature(this)
         ui = ActivityMainBinding.inflate(layoutInflater)
         setContentView(ui.root)
+        Appearance.finish(this)
         prefs = PreferenceManager.getDefaultSharedPreferences(this)
 
         setupBars()
+        applyToolbarPosition()
         onBackPressedDispatcher.addCallback(this) { goBack() }
 
         ViewCompat.setOnApplyWindowInsetsListener(ui.content) { view, insets ->
@@ -134,7 +145,7 @@ class MainActivity : AppCompatActivity() {
         val external = externalUrl(intent)
         val saved = Session.load(this)?.takeIf { restoreEnabled() }
         saved?.let(::restore)
-        if (external != null) newTab(external) else if (saved == null) newTab(HOME)
+        if (external != null) newTab(external) else if (saved == null) newTab(home())
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -144,12 +155,25 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        Appearance.beforeCreate(this)
+        if (Appearance.signature(this) != appearanceSig) {
+            recreate()
+            return
+        }
         web.onResume()
         tabs.forEach(::applySettings)
-        if (prefs.getBoolean(Prefs.PENDING_CLEAR, false)) {
+        applyToolbarPosition()
+        ui.swipe.isEnabled = prefs.getBoolean(Prefs.PULL_REFRESH, true)
+        val pending = prefs.getStringSet(Prefs.PENDING_CLEAR, null)
+        if (!pending.isNullOrEmpty()) {
             prefs.edit { remove(Prefs.PENDING_CLEAR) }
-            clearData()
+            clearData(pending.toSet())
         }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (Appearance.signature(this) != appearanceSig) recreate()
     }
 
     override fun onPause() {
@@ -160,7 +184,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        if (isFinishing && prefs.getBoolean(Prefs.CLEAR_ON_EXIT, false)) clearData()
+        if (isFinishing && prefs.getBoolean(Prefs.CLEAR_ON_EXIT, false)) {
+            clearData(setOf(Prefs.CLEAR_HISTORY, Prefs.CLEAR_COOKIES, Prefs.CLEAR_CACHE))
+        }
         tabs.toList().forEach(::destroy)
         tabs.clear()
         super.onDestroy()
@@ -205,7 +231,7 @@ class MainActivity : AppCompatActivity() {
             Session.clear(this)
             return
         }
-        Session.save(this, tabs.map { Session.Entry(titleOf(it), urlOf(it) ?: HOME) }, tabs.indexOf(current))
+        Session.save(this, tabs.map { Session.Entry(titleOf(it), urlOf(it) ?: home()) }, tabs.indexOf(current))
     }
 
     private fun select(tab: Tab) {
@@ -217,7 +243,10 @@ class MainActivity : AppCompatActivity() {
         ui.webContainer.apply {
             alpha = 0f
             translationY = dp(10).toFloat()
-            animate().alpha(1f).translationY(0f).setDuration(Motion.MEDIUM).setInterpolator(Motion.decelerate).start()
+            scaleX = 0.97f
+            scaleY = 0.97f
+            animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setDuration(Motion.MEDIUM)
+                .setInterpolator(Motion.decelerate).start()
         }
         hideSuggestions()
         ui.urlBar.clearFocus()
@@ -235,7 +264,7 @@ class MainActivity : AppCompatActivity() {
         val index = tabs.indexOf(tab)
         if (index < 0) return
         tabs.removeAt(index)
-        if (tabs.isEmpty()) newTab(HOME)
+        if (tabs.isEmpty()) newTab(home())
         else if (tab === current) select(tabs[minOf(index, tabs.lastIndex)])
         destroy(tab)
         updateTabCount()
@@ -286,6 +315,11 @@ class MainActivity : AppCompatActivity() {
         return Triple(sheet, content, content.findViewById(R.id.tabList))
     }
 
+    private val avatarColors = intArrayOf(
+        0xFF4285F4.toInt(), 0xFF34A853.toInt(), 0xFFA142F4.toInt(),
+        0xFFF29900.toInt(), 0xFFE8438A.toInt(), 0xFF12B5CB.toInt(),
+    )
+
     private fun row(
         list: LinearLayout,
         title: String,
@@ -294,6 +328,8 @@ class MainActivity : AppCompatActivity() {
         animate: Boolean,
         onOpen: () -> Unit,
         onClose: (View) -> Unit,
+        favicon: Bitmap? = null,
+        selected: Boolean = false,
     ): View {
         val row = layoutInflater.inflate(R.layout.item_tab, list, false)
         row.findViewById<TextView>(R.id.tabTitle).text = title
@@ -301,6 +337,20 @@ class MainActivity : AppCompatActivity() {
             text = subtitle
             isGone = subtitle.isEmpty() || subtitle == title
         }
+        val seed = subtitle.ifEmpty { title }
+        val color = avatarColors[(seed.hashCode() and 0x7fffffff) % avatarColors.size]
+        row.findViewById<View>(R.id.avatarBg).backgroundTintList =
+            ColorStateList.valueOf(ColorUtils.setAlphaComponent(color, 0x33))
+        row.findViewById<TextView>(R.id.avatarLetter).apply {
+            text = seed.firstOrNull { it.isLetterOrDigit() }?.uppercaseChar()?.toString().orEmpty()
+            setTextColor(color)
+            isGone = favicon != null
+        }
+        row.findViewById<ImageView>(R.id.avatarIcon).apply {
+            if (favicon != null) setImageBitmap(favicon)
+            isVisible = favicon != null
+        }
+        if (selected) row.setBackgroundResource(R.drawable.bg_row_selected)
         row.setOnClickListener { onOpen() }
         row.findViewById<View>(R.id.tabClose).apply {
             pressable()
@@ -341,14 +391,15 @@ class MainActivity : AppCompatActivity() {
                         sheet.dismiss()
                     },
                     onClose = { row ->
-                        val last = tabs.size == 1
+                        val refill = tabs.size == 1 || tab === current
                         slideOut(row) {
                             closeTab(tab)
-                            if (last) fill(false) else list.removeView(row)
+                            if (refill) fill(false) else list.removeView(row)
                         }
                     },
+                    favicon = tab.favicon,
+                    selected = tab === current,
                 )
-                if (tab === current) view.setBackgroundColor(getColor(R.color.toolbar))
                 list.addView(view)
             }
         }
@@ -356,7 +407,7 @@ class MainActivity : AppCompatActivity() {
         content.findViewById<View>(R.id.newTab).apply {
             pressable(0.95f)
             setOnClickListener {
-                newTab(HOME)
+                newTab(home())
                 sheet.dismiss()
             }
         }
@@ -412,21 +463,11 @@ class MainActivity : AppCompatActivity() {
     ) {
         val name = URLUtil.guessFileName(if (url.startsWith("http")) url else "download", disposition, mime)
         when {
-            url.startsWith("https://") || url.startsWith("http://") -> confirmDownload(name, length) {
-                val request = DownloadManager.Request(Uri.parse(url))
-                    .setMimeType(mime)
-                    .addRequestHeader("User-Agent", userAgent)
-                    .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
-                CookieManager.getInstance().getCookie(url)?.let { request.addRequestHeader("Cookie", it) }
-                getSystemService(DownloadManager::class.java).enqueue(request)
-                notify(R.string.downloading)
-            }
+            url.startsWith("https://") || url.startsWith("http://") ->
+                confirmDownload(name, length) { enqueue(url, userAgent, mime, name) }
             url.startsWith("data:") -> {
                 val decoded = decodeDataUrl(url) ?: return notify(R.string.download_failed)
-                confirmDownload(name, decoded.second.size.toLong()) {
-                    saveToDownloads(name, decoded.first, decoded.second)
-                }
+                confirmDownload(name, decoded.second.size.toLong()) { saveBytes(name, decoded.first, decoded.second) }
             }
             url.startsWith("blob:") -> confirmDownload(name, length) {
                 val token = UUID.randomUUID().toString()
@@ -438,13 +479,82 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun confirmDownload(name: String, size: Long, onConfirm: () -> Unit) {
+        if (!prefs.getBoolean(Prefs.CONFIRM_DOWNLOADS, true)) {
+            onConfirm()
+            return
+        }
         val detail = if (size > 0) Formatter.formatShortFileSize(this, size) else getString(R.string.unknown_size)
         MaterialAlertDialogBuilder(this)
             .setTitle(R.string.download_title)
-            .setMessage("$name\n$detail")
+            .setMessage("$name\n$detail\n\n${getString(R.string.save_to)}: ${Storage.label(this)}")
             .setPositiveButton(R.string.download) { _, _ -> onConfirm() }
+            .setNeutralButton(R.string.change_folder) { _, _ ->
+                folderPicker.show { confirmDownload(name, size, onConfirm) }
+            }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    /** Hands an http(s) download to the system downloader and records it in the Downloads list. */
+    private fun enqueue(url: String, userAgent: String, mime: String?, name: String) {
+        val id = UUID.randomUUID().toString()
+        val tree = Storage.treeUri(this)
+        val base = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+        val request = DownloadManager.Request(Uri.parse(url))
+            .setTitle(name)
+            .setMimeType(mime)
+            .addRequestHeader("User-Agent", userAgent)
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+        // A custom folder cannot be written by the system downloader: it saves to a private
+        // temporary file first and DownloadReceiver moves it when it finishes.
+        var temp: String? = null
+        if (tree != null && base != null) {
+            temp = File(base, "brisa/$id/$name").absolutePath
+            request.setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, "brisa/$id/$name")
+        } else {
+            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
+        }
+        CookieManager.getInstance().getCookie(url)?.let { request.addRequestHeader("Cookie", it) }
+        val dmId = runCatching { getSystemService(DownloadManager::class.java).enqueue(request) }.getOrNull()
+            ?: return notify(R.string.download_failed)
+        Downloads.add(
+            this,
+            Downloads.Item(
+                id, dmId, name, url, mime?.takeIf { it.isNotBlank() } ?: "application/octet-stream",
+                -1, 0, System.currentTimeMillis(), Downloads.RUNNING, null,
+                if (temp != null) tree.toString() else null, temp,
+            ),
+        )
+        notify(getString(R.string.downloading), R.string.view) { openDownloads() }
+    }
+
+    /** Saves bytes we already have (data: and blob: downloads) off the main thread. */
+    private fun saveBytes(name: String, mime: String, bytes: ByteArray) {
+        val app = applicationContext
+        val tree = Storage.treeUri(this)
+        Thread {
+            val uri = Storage.save(app, name, mime, tree) { it.write(bytes) }
+            if (uri != null) {
+                val size = bytes.size.toLong()
+                Downloads.add(
+                    app,
+                    Downloads.Item(
+                        UUID.randomUUID().toString(), 0, name, "", mime, size, size, System.currentTimeMillis(),
+                        Downloads.DONE, uri.toString(), tree?.toString(), null,
+                    ),
+                )
+            }
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                if (uri != null) notify(getString(R.string.saved_to, Storage.label(this)), R.string.view) { openDownloads() }
+                else notify(R.string.download_failed)
+            }
+        }.start()
+    }
+
+    private fun openDownloads() {
+        val options = ActivityOptions.makeCustomAnimation(this, R.anim.enter_from_right, R.anim.exit_to_left)
+        startActivity(Intent(this, DownloadsActivity::class.java), options.toBundle())
     }
 
     private fun blobScript(url: String, token: String) = """
@@ -465,7 +575,7 @@ class MainActivity : AppCompatActivity() {
         blobToken = null
         val bytes = runCatching { Base64.decode(data, Base64.DEFAULT) }.getOrNull()
             ?: return notify(R.string.download_failed)
-        saveToDownloads(blobName, mime, bytes)
+        saveBytes(blobName, mime, bytes)
     }
 
     private fun decodeDataUrl(url: String): Pair<String, ByteArray>? = runCatching {
@@ -476,19 +586,6 @@ class MainActivity : AppCompatActivity() {
         val bytes = if (meta.endsWith(";base64")) Base64.decode(body, Base64.DEFAULT) else Uri.decode(body).toByteArray()
         mime to bytes
     }.getOrNull()
-
-    private fun saveToDownloads(name: String, mime: String, bytes: ByteArray) {
-        val values = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, name)
-            put(MediaStore.Downloads.MIME_TYPE, mime)
-            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-        }
-        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-        val saved = uri != null && runCatching {
-            contentResolver.openOutputStream(uri)?.use { it.write(bytes) } != null
-        }.getOrDefault(false)
-        notify(if (saved) R.string.saved_to_downloads else R.string.download_failed)
-    }
 
     /**
      * Maps a WebView file request to a system picker. The folder and save modes, and the read/write hint,
@@ -534,7 +631,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun emptyView(text: Int) = TextView(this).apply {
         setText(text)
-        setTextColor(getColor(R.color.muted))
+        setTextColor(themeColor(R.attr.brisaMuted))
         setPadding(dp(24), dp(12), dp(24), dp(12))
     }
 
@@ -588,12 +685,12 @@ class MainActivity : AppCompatActivity() {
         }
         ui.suggestions.removeAllViews()
         val target = resolve(q)
-        val isSearch = target.startsWith("https://www.google.com/search")
+        val isSearch = target == searchUrl(q)
         ui.suggestions.addView(
             suggestionRow(
                 if (isSearch) R.drawable.ic_search else R.drawable.ic_arrow_forward,
                 q,
-                if (isSearch) getString(R.string.search_google) else target,
+                if (isSearch) getString(R.string.search_with, SearchEngines.current(prefs).name) else target,
             ) { open(target) },
         )
         val seen = mutableSetOf<String>()
@@ -631,17 +728,19 @@ class MainActivity : AppCompatActivity() {
         suggestShown = true
         ui.suggestions.animate().cancel()
         ui.suggestions.alpha = 0f
-        ui.suggestions.translationY = -dp(8).toFloat()
+        ui.suggestions.translationY = suggestOffset()
         ui.suggestions.isVisible = true
         ui.suggestions.animate().alpha(1f).translationY(0f).setDuration(Motion.SHORT)
             .setInterpolator(Motion.decelerate).start()
     }
 
+    private fun suggestOffset() = if (toolbarBottom) dp(8).toFloat() else -dp(8).toFloat()
+
     private fun hideSuggestions() {
         if (!suggestShown) return
         suggestShown = false
         ui.suggestions.animate().cancel()
-        ui.suggestions.animate().alpha(0f).translationY(-dp(8).toFloat()).setDuration(100)
+        ui.suggestions.animate().alpha(0f).translationY(suggestOffset()).setDuration(100)
             .withEndAction { if (!suggestShown) ui.suggestions.isGone = true }.start()
     }
 
@@ -687,6 +786,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                 tab.title = ""
+                tab.favicon = null
                 setLoading(tab, true)
                 if (tab === current) showUrl(url)
             }
@@ -723,6 +823,10 @@ class MainActivity : AppCompatActivity() {
             override fun onProgressChanged(view: WebView, newProgress: Int) {
                 tab.progress = newProgress
                 if (tab === current) ui.progress.setProgressCompat(newProgress, true)
+            }
+
+            override fun onReceivedIcon(view: WebView, icon: Bitmap?) {
+                tab.favicon = icon
             }
 
             override fun onReceivedTitle(view: WebView, title: String?) {
@@ -790,8 +894,11 @@ class MainActivity : AppCompatActivity() {
         tab.web.settings.apply {
             javaScriptEnabled = prefs.getBoolean(Prefs.JAVASCRIPT, true)
             userAgentString = if (desktop) DESKTOP_UA else defaultUa
-            useWideViewPort = desktop
+            useWideViewPort = true
             loadWithOverviewMode = desktop
+            textZoom = prefs.getInt(Prefs.TEXT_SIZE, 100)
+            mediaPlaybackRequiresUserGesture = !prefs.getBoolean(Prefs.AUTOPLAY, false)
+            applyDark(prefs.getBoolean(Prefs.WEB_DARK, false))
         }
         CookieManager.getInstance().apply {
             setAcceptCookie(true)
@@ -799,14 +906,25 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun clearData() {
-        current.web.clearCache(true)
-        tabs.forEach { it.web.clearHistory() }
-        WebStorage.getInstance().deleteAllData()
-        History.clear(this)
-        CookieManager.getInstance().apply {
-            removeAllCookies(null)
-            flush()
+    @Suppress("DEPRECATION")
+    private fun WebSettings.applyDark(on: Boolean) {
+        if (Build.VERSION.SDK_INT >= 33) isAlgorithmicDarkeningAllowed = on
+        else forceDark = if (on) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF
+    }
+
+    private fun clearData(items: Set<String>) {
+        if (Prefs.CLEAR_CACHE in items) current.web.clearCache(true)
+        if (Prefs.CLEAR_HISTORY in items) {
+            History.clear(this)
+            tabs.forEach { it.web.clearHistory() }
+        }
+        if (Prefs.CLEAR_COOKIES in items) {
+            WebStorage.getInstance().deleteAllData()
+            tabs.forEach { it.web.clearFormData() }
+            CookieManager.getInstance().apply {
+                removeAllCookies(null)
+                flush()
+            }
         }
     }
 
@@ -852,13 +970,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun searchUrl(query: String) = Uri.Builder()
-        .scheme("https")
-        .authority("www.google.com")
-        .path("search")
-        .appendQueryParameter("q", query)
-        .build()
-        .toString()
+    private fun searchUrl(query: String) = SearchEngines.current(prefs).url(query)
+
+    private fun home(): String {
+        val custom = prefs.getString(Prefs.HOMEPAGE, "").orEmpty().trim()
+        return if (custom.isEmpty()) SearchEngines.current(prefs).home else resolve(custom)
+    }
 
     private fun externalUrl(intent: Intent?): String? {
         if (intent?.action != Intent.ACTION_VIEW) return null
@@ -873,8 +990,8 @@ class MainActivity : AppCompatActivity() {
     private fun setupBars() {
         listOf(ui.tabsButton, ui.menu, ui.clearUrl, ui.findPrev, ui.findNext, ui.findClose).forEach { it.pressable() }
 
-        ui.swipe.setColorSchemeColors(getColor(R.color.accent))
-        ui.swipe.setProgressBackgroundColorSchemeColor(getColor(R.color.popup))
+        ui.swipe.setColorSchemeColors(themeColor(R.attr.brisaAccent))
+        ui.swipe.setProgressBackgroundColorSchemeColor(themeColor(R.attr.brisaPopup))
         ui.swipe.setOnChildScrollUpCallback { _, _ -> web.scrollY > 0 }
         ui.swipe.setOnRefreshListener { web.reload() }
 
@@ -922,7 +1039,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun animateFocus(focused: Boolean) {
-        val accent = getColor(R.color.accent)
+        val accent = themeColor(R.attr.brisaAccent)
         val clear = accent and 0x00FFFFFF
         ValueAnimator.ofArgb(if (focused) clear else accent, if (focused) accent else clear).apply {
             duration = Motion.MEDIUM
@@ -934,16 +1051,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateSiteIcon(url: String?) {
         val (icon, color) = when {
-            ui.urlBar.hasFocus() || url.isNullOrEmpty() -> R.drawable.ic_search to R.color.muted
-            url.orEmpty().startsWith("https://") -> R.drawable.ic_lock to R.color.muted
-            else -> R.drawable.ic_lock_open to R.color.warning
+            ui.urlBar.hasFocus() || url.isNullOrEmpty() -> R.drawable.ic_search to R.attr.brisaMuted
+            url.orEmpty().startsWith("https://") -> R.drawable.ic_lock to R.attr.brisaMuted
+            else -> R.drawable.ic_lock_open to R.attr.brisaWarning
         }
         if (ui.siteIcon.tag == icon) return
         ui.siteIcon.tag = icon
         ui.siteIcon.animate().cancel()
         ui.siteIcon.animate().alpha(0f).setDuration(80).withEndAction {
             ui.siteIcon.setImageResource(icon)
-            ui.siteIcon.imageTintList = ColorStateList.valueOf(getColor(color))
+            ui.siteIcon.imageTintList = ColorStateList.valueOf(themeColor(color))
             ui.siteIcon.animate().alpha(1f).setDuration(140).start()
         }.start()
     }
@@ -1001,10 +1118,11 @@ class MainActivity : AppCompatActivity() {
         bind(m.iconForward) { web.goForward() }
         bind(m.iconBookmark) { toggleBookmark() }
         bind(m.iconReload) { if (current.loading) web.stopLoading() else web.reload() }
-        bind(m.rowNewTab) { newTab(HOME) }
+        bind(m.rowNewTab) { newTab(home()) }
         bind(m.rowFind) { openFind() }
         bind(m.rowShare) { share() }
         bind(m.rowBookmarks) { showBookmarks() }
+        bind(m.rowDownloads) { openDownloads() }
         bind(m.rowHistory) { showHistory() }
         bind(m.rowSettings) {
             val options = ActivityOptions.makeCustomAnimation(this, R.anim.enter_from_right, R.anim.exit_to_left)
@@ -1016,11 +1134,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         val items = listOf<View>(
-            m.iconRow, m.rowNewTab, m.rowFind, m.rowShare, m.rowBookmarks, m.rowHistory, m.rowDesktop, m.rowSettings,
+            m.iconRow, m.rowNewTab, m.rowFind, m.rowShare, m.rowBookmarks, m.rowDownloads, m.rowHistory,
+            m.rowDesktop, m.rowSettings,
         )
         m.card.doOnLayout { card ->
             card.pivotX = card.width.toFloat()
-            card.pivotY = 0f
+            card.pivotY = if (toolbarBottom) card.height.toFloat() else 0f
             card.alpha = 0f
             card.scaleX = 0.8f
             card.scaleY = 0.8f
@@ -1033,7 +1152,13 @@ class MainActivity : AppCompatActivity() {
                     .setDuration(220).setInterpolator(Motion.decelerate).start()
             }
         }
-        popup.showAsDropDown(ui.menu, 0, -dp(4), Gravity.END)
+        if (toolbarBottom) {
+            val at = IntArray(2)
+            ui.menu.getLocationInWindow(at)
+            popup.showAtLocation(ui.root, Gravity.BOTTOM or Gravity.END, dp(2), ui.root.height - at[1] + dp(2))
+        } else {
+            popup.showAsDropDown(ui.menu, 0, -dp(4), Gravity.END)
+        }
     }
 
     private fun View.enable(on: Boolean) {
@@ -1131,12 +1256,32 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun notify(message: Int) = Snackbar.make(ui.root, message, Snackbar.LENGTH_SHORT).show()
+    private fun notify(message: Int) = notify(getString(message))
+
+    private fun notify(message: String, actionLabel: Int? = null, action: (() -> Unit)? = null) {
+        Snackbar.make(ui.root, message, Snackbar.LENGTH_LONG).apply {
+            if (actionLabel != null && action != null) setAction(actionLabel) { action() }
+            if (toolbarBottom) anchorView = ui.topBar
+            show()
+        }
+    }
+
+    /** Moves the address bar to the top or bottom of the screen, following Settings. */
+    private fun applyToolbarPosition() {
+        val bottom = prefs.getString(Prefs.TOOLBAR, "top") == "bottom"
+        if (bottom == toolbarBottom && ui.content.getChildAt(0) === (if (bottom) ui.webFrame else ui.topBar)) return
+        toolbarBottom = bottom
+        val order = if (bottom) listOf(ui.webFrame, ui.findBar, ui.progress, ui.topBar)
+        else listOf(ui.topBar, ui.progress, ui.webFrame, ui.findBar)
+        ui.content.removeAllViews()
+        order.forEach { ui.content.addView(it) }
+        (ui.suggestions.layoutParams as FrameLayout.LayoutParams).gravity = if (bottom) Gravity.BOTTOM else Gravity.TOP
+        ui.suggestions.requestLayout()
+    }
 
     // endregion
 
     private companion object {
-        const val HOME = "https://www.google.com"
         const val DESKTOP_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         const val MAX_BLOB = 26214400

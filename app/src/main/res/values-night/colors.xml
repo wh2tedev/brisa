@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#131314</color>
+    <color name="toolbar">#1E1F22</color>
+    <color name="field">#2D2F33</color>
+    <color name="popup">#26272B</color>
+    <color name="divider">#36383D</color>
+    <color name="on_bg">#E8EAED</color>
+    <color name="muted">#9AA0A6</color>
+    <color name="warning">#F28B82</color>
+    <color name="accent_on">#17181A</color>
+    <color name="accent_blue">#8AB4F8</color>
+    <color name="accent_green">#81C995</color>
+    <color name="accent_purple">#C58AF9</color>
+    <color name="accent_orange">#FCAD70</color>
+    <color name="accent_pink">#FF8BCB</color>
+    <color name="accent_teal">#78D9EC</color>
+    <color name="accent_red">#F28B82</color>
+</resources>

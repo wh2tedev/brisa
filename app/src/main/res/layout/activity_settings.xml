@@ -3,18 +3,18 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:id="@+id/settingsRoot"
-    android:background="@color/toolbar"
+    android:background="?attr/brisaToolbar"
     android:orientation="vertical">
 
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
-        android:background="@color/toolbar" />
+        android:background="?attr/brisaToolbar" />
 
     <FrameLayout
         android:id="@+id/container"
-        android:background="@color/bg"
+        android:background="?attr/brisaBg"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 </LinearLayout>

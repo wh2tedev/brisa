@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:clipChildren="false"
@@ -8,7 +9,7 @@
 
     <LinearLayout
         android:id="@+id/card"
-        android:layout_width="264dp"
+        android:layout_width="272dp"
         android:layout_height="wrap_content"
         android:background="@drawable/bg_popup"
         android:elevation="8dp"
@@ -62,31 +63,42 @@
             android:layout_width="match_parent"
             android:layout_height="1dp"
             android:layout_marginVertical="4dp"
-            android:background="@color/divider" />
+            android:background="?attr/brisaDivider" />
 
         <TextView
             android:id="@+id/rowNewTab"
             style="@style/MenuRow"
+            android:drawableStart="@drawable/ic_add"
             android:text="@string/new_tab" />
 
         <TextView
             android:id="@+id/rowFind"
             style="@style/MenuRow"
+            android:drawableStart="@drawable/ic_search"
             android:text="@string/find_in_page" />
 
         <TextView
             android:id="@+id/rowShare"
             style="@style/MenuRow"
+            android:drawableStart="@drawable/ic_share"
             android:text="@string/share" />
 
         <TextView
             android:id="@+id/rowBookmarks"
             style="@style/MenuRow"
+            android:drawableStart="@drawable/ic_star"
             android:text="@string/bookmarks" />
+
+        <TextView
+            android:id="@+id/rowDownloads"
+            style="@style/MenuRow"
+            android:drawableStart="@drawable/ic_download"
+            android:text="@string/downloads" />
 
         <TextView
             android:id="@+id/rowHistory"
             style="@style/MenuRow"
+            android:drawableStart="@drawable/ic_history"
             android:text="@string/history" />
 
         <LinearLayout
@@ -98,15 +110,23 @@
             android:focusable="true"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingStart="20dp"
+            android:paddingStart="18dp"
             android:paddingEnd="16dp">
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:importantForAccessibility="no"
+                android:src="@drawable/ic_desktop"
+                app:tint="?attr/brisaMuted" />
 
             <TextView
                 android:layout_width="0dp"
+                android:layout_marginStart="16dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="@string/desktop_site"
-                android:textColor="@color/on_bg"
+                android:textColor="?attr/brisaOnBg"
                 android:textSize="15sp" />
 
             <com.google.android.material.materialswitch.MaterialSwitch
@@ -120,6 +140,7 @@
         <TextView
             android:id="@+id/rowSettings"
             style="@style/MenuRow"
+            android:drawableStart="@drawable/ic_settings"
             android:text="@string/settings" />
     </LinearLayout>
 </FrameLayout>

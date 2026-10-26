@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <attr name="brisaBg" format="color" />
+    <attr name="brisaToolbar" format="color" />
+    <attr name="brisaField" format="color" />
+    <attr name="brisaPopup" format="color" />
+    <attr name="brisaDivider" format="color" />
+    <attr name="brisaOnBg" format="color" />
+    <attr name="brisaMuted" format="color" />
+    <attr name="brisaAccent" format="color" />
+    <attr name="brisaOnAccent" format="color" />
+    <attr name="brisaWarning" format="color" />
+</resources>

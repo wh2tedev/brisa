@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
+    <PreferenceCategory app:title="@string/cat_content" app:iconSpaceReserved="false">
+        <SwitchPreferenceCompat app:key="javascript" app:defaultValue="true" app:title="@string/pref_js" app:summary="@string/pref_js_sum" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="autoplay" app:defaultValue="false" app:title="@string/pref_autoplay" app:summary="@string/pref_autoplay_sum" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="desktop_site" app:defaultValue="false" app:title="@string/desktop_site" app:summary="@string/pref_desktop_sum" app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+    <PreferenceCategory app:title="@string/cat_access" app:iconSpaceReserved="false">
+        <SeekBarPreference app:key="text_size" app:defaultValue="100" app:min="50" android:max="200" app:seekBarIncrement="10" app:showSeekBarValue="true" app:title="@string/pref_text_size" app:summary="@string/pref_text_size_sum" app:iconSpaceReserved="false" xmlns:android="http://schemas.android.com/apk/res/android" />
+    </PreferenceCategory>
+</PreferenceScreen>

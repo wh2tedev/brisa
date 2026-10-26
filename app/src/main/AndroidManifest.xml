@@ -32,6 +32,19 @@
         </activity>
 
         <activity
+            android:name=".DownloadsActivity"
+            android:exported="false"
+            android:label="@string/downloads" />
+
+        <receiver
+            android:name=".DownloadReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.DOWNLOAD_COMPLETE" />
+            </intent-filter>
+        </receiver>
+
+        <activity
             android:name=".SettingsActivity"
             android:exported="false"
             android:label="@string/settings_title" />

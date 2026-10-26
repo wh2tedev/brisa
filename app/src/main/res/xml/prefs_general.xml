@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
+    <PreferenceCategory app:title="@string/cat_search" app:iconSpaceReserved="false">
+        <ListPreference app:key="search_engine" app:defaultValue="google" app:entries="@array/engine_names" app:entryValues="@array/engine_values" app:title="@string/pref_engine" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
+        <EditTextPreference app:key="homepage" app:defaultValue="" app:dialogTitle="@string/pref_homepage" app:title="@string/pref_homepage" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+    <PreferenceCategory app:title="@string/cat_startup" app:iconSpaceReserved="false">
+        <SwitchPreferenceCompat app:key="restore_tabs" app:defaultValue="true" app:title="@string/pref_restore_tabs" app:summary="@string/pref_restore_tabs_sum" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="pull_to_refresh" app:defaultValue="true" app:title="@string/pref_pull" app:summary="@string/pref_pull_sum" app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+</PreferenceScreen>

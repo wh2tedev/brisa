@@ -3,7 +3,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/toolbar">
+    android:background="?attr/brisaToolbar">
 
     <LinearLayout
         android:id="@+id/content"
@@ -12,19 +12,20 @@
         android:orientation="vertical">
 
         <LinearLayout
+            android:id="@+id/topBar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@color/toolbar"
+            android:background="?attr/brisaToolbar"
             android:gravity="center_vertical"
             android:orientation="horizontal"
             android:paddingStart="12dp"
             android:paddingEnd="4dp"
-            android:paddingVertical="8dp">
+            android:paddingVertical="9dp">
 
             <LinearLayout
                 android:id="@+id/omnibox"
                 android:layout_width="0dp"
-                android:layout_height="44dp"
+                android:layout_height="46dp"
                 android:layout_weight="1"
                 android:background="@drawable/bg_omnibox"
                 android:gravity="center_vertical"
@@ -37,7 +38,7 @@
                     android:layout_marginStart="14dp"
                     android:importantForAccessibility="no"
                     android:src="@drawable/ic_search"
-                    app:tint="@color/muted" />
+                    app:tint="?attr/brisaMuted" />
 
                 <EditText
                     android:id="@+id/urlBar"
@@ -46,15 +47,15 @@
                     android:layout_weight="1"
                     android:background="@null"
                     android:hint="@string/url_hint"
-                    android:importantForAutofill="no"
+                                        android:importantForAutofill="no"
                     android:imeOptions="actionGo"
                     android:inputType="textUri"
                     android:maxLines="1"
                     android:paddingStart="10dp"
                     android:paddingEnd="6dp"
                     android:selectAllOnFocus="true"
-                    android:textColor="@color/on_bg"
-                    android:textColorHint="@color/muted"
+                    android:textColor="?attr/brisaOnBg"
+                    android:textColorHint="?attr/brisaMuted"
                     android:textSize="15sp" />
 
                 <ImageButton
@@ -65,7 +66,7 @@
                     android:contentDescription="@string/clear"
                     android:padding="10dp"
                     android:src="@drawable/ic_close"
-                    android:tint="@color/muted"
+                    android:tint="?attr/brisaMuted"
                     android:visibility="gone" />
             </LinearLayout>
 
@@ -84,7 +85,7 @@
                     android:background="@drawable/bg_tab_count"
                     android:gravity="center"
                     android:text="1"
-                    android:textColor="@color/on_bg"
+                    android:textColor="?attr/brisaOnBg"
                     android:textSize="12sp"
                     android:textStyle="bold" />
             </FrameLayout>
@@ -101,16 +102,17 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:visibility="gone"
-            app:indicatorColor="@color/accent"
-            app:trackColor="@color/toolbar"
+            app:indicatorColor="?attr/brisaAccent"
             app:trackCornerRadius="2dp"
-            app:trackThickness="3dp" />
+            app:trackThickness="3dp"
+            app:trackColor="?attr/brisaToolbar" />
 
         <FrameLayout
+            android:id="@+id/webFrame"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:background="@color/bg">
+            android:background="?attr/brisaBg">
 
             <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
                 android:id="@+id/swipe"
@@ -127,8 +129,9 @@
                 android:id="@+id/suggestions"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:background="@color/popup"
-                android:elevation="6dp"
+                android:layout_gravity="top"
+                android:background="?attr/brisaPopup"
+                android:elevation="8dp"
                 android:orientation="vertical"
                 android:paddingVertical="4dp"
                 android:visibility="gone" />
@@ -138,7 +141,7 @@
             android:id="@+id/findBar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@color/toolbar"
+            android:background="?attr/brisaToolbar"
             android:gravity="center_vertical"
             android:orientation="horizontal"
             android:paddingStart="20dp"
@@ -156,8 +159,8 @@
                 android:imeOptions="actionSearch"
                 android:inputType="text"
                 android:maxLines="1"
-                android:textColor="@color/on_bg"
-                android:textColorHint="@color/muted"
+                android:textColor="?attr/brisaOnBg"
+                android:textColorHint="?attr/brisaMuted"
                 android:textSize="15sp" />
 
             <TextView
@@ -165,7 +168,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginHorizontal="8dp"
-                android:textColor="@color/muted"
+                android:textColor="?attr/brisaMuted"
                 android:textSize="13sp" />
 
             <ImageButton

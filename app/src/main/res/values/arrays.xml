@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="engine_names"><item>Google</item><item>DuckDuckGo</item><item>Bing</item><item>Brave</item><item>Ecosia</item><item>Startpage</item></string-array>
+    <string-array name="engine_values"><item>google</item><item>duckduckgo</item><item>bing</item><item>brave</item><item>ecosia</item><item>startpage</item></string-array>
+    <string-array name="theme_names"><item>System default</item><item>Light</item><item>Dark</item></string-array>
+    <string-array name="theme_values"><item>system</item><item>light</item><item>dark</item></string-array>
+    <string-array name="accent_names"><item>Blue</item><item>Green</item><item>Purple</item><item>Orange</item><item>Pink</item><item>Teal</item><item>Red</item></string-array>
+    <string-array name="accent_values"><item>blue</item><item>green</item><item>purple</item><item>orange</item><item>pink</item><item>teal</item><item>red</item></string-array>
+    <string-array name="pos_names"><item>Top</item><item>Bottom</item></string-array>
+    <string-array name="pos_values"><item>top</item><item>bottom</item></string-array>
+</resources>

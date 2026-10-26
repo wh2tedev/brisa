@@ -8,7 +8,8 @@ Google is the default search engine. No analytics, no accounts, no third-party s
 - Multiple tabs with a bottom-sheet tab switcher
 - Find in page
 - Desktop site mode
-- Downloads through the system download manager
+- Downloads screen with progress, open, share and delete; choose the download folder
+- Settings by section: search engine, homepage, theme (light, dark, pure black), accent color, address bar at the top or bottom, text size
 - Bookmarks and history, stored on the device only
 - Address bar suggestions computed locally from bookmarks and history
 - Pull to refresh
@@ -16,7 +17,7 @@ Google is the default search engine. No analytics, no accounts, no third-party s
 - Connection indicator in the address bar (lock for HTTPS, warning for HTTP)
 - File uploads through the system picker, and fullscreen video
 - Tabs are restored on launch (only the selected tab loads until you open the others)
-- Download confirmation, including `data:` and `blob:` downloads
+- Optional download confirmation, including `data:` and `blob:` downloads
 - Tracker and ad blocking for third-party requests, on by default
 - Opens `http` and `https` links from other apps
 
@@ -48,8 +49,8 @@ Cleartext traffic is allowed so that `localhost`, LAN addresses and dev servers 
 - Certificate errors cancel the load, with no option to proceed.
 - Safe Browsing enabled; local file and content provider access disabled.
 - Third-party cookies blocked by default.
-- Third-party requests to known ad and tracking domains are blocked (`app/src/main/assets/blocklist.txt`, editable in Settings).
-- Downloads always ask for confirmation. `blob:` downloads use a one-time token and are capped at 25 MB.
+- Third-party requests to known ad and tracking domains are blocked (`app/src/main/assets/blocklist.txt`).
+- Downloads ask for confirmation by default. `blob:` downloads use a one-time token and are capped at 25 MB.
 - `DNT` and `Sec-GPC` headers on top-level navigation (configurable).
 - Web permissions (camera, microphone, location) are always denied.
 - Non-web schemes (`intent:`, `file:`, `javascript:`, …) are blocked during navigation.

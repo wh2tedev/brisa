@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
+    <PreferenceCategory app:title="@string/cat_theme" app:iconSpaceReserved="false">
+        <ListPreference app:key="theme_mode" app:defaultValue="system" app:entries="@array/theme_names" app:entryValues="@array/theme_values" app:title="@string/pref_theme" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="amoled" app:defaultValue="false" app:title="@string/pref_amoled" app:summary="@string/pref_amoled_sum" app:iconSpaceReserved="false" />
+        <ListPreference app:key="accent" app:defaultValue="blue" app:entries="@array/accent_names" app:entryValues="@array/accent_values" app:title="@string/pref_accent" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+    <PreferenceCategory app:title="@string/cat_layout" app:iconSpaceReserved="false">
+        <ListPreference app:key="toolbar_position" app:defaultValue="top" app:entries="@array/pos_names" app:entryValues="@array/pos_values" app:title="@string/pref_toolbar" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+    <PreferenceCategory app:title="@string/cat_pages" app:iconSpaceReserved="false">
+        <SwitchPreferenceCompat app:key="web_dark" app:defaultValue="false" app:title="@string/pref_web_dark" app:summary="@string/pref_web_dark_sum" app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+</PreferenceScreen>
