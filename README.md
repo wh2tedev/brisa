@@ -13,6 +13,9 @@ Google is the default search engine. No analytics, no accounts, no third-party s
 - Bookmarks and history, stored on the device only
 - Address bar suggestions computed locally from bookmarks and history
 - Pull to refresh
+- Pop-up windows opened by a tap (sign-in flows) open as a tab and return to the page that opened them
+- Username and password prompt for HTTP authentication, with a warning on unencrypted connections
+- Error pages that follow the theme, with a retry button and hints for local servers
 - Material 3 motion: spring press feedback, animated menu, tab sheet and omnibox, shared-axis transitions
 - Connection indicator in the address bar (lock for HTTPS, warning for HTTP)
 - File uploads through the system picker, and fullscreen video

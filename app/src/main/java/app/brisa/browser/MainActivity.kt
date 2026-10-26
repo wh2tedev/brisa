@@ -25,6 +25,12 @@ import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.os.Message
+import android.text.TextUtils
+import android.view.WindowManager
+import android.webkit.HttpAuthHandler
+import android.app.Dialog
+import app.brisa.browser.databinding.DialogHttpAuthBinding
 import android.net.http.SslError
 import android.os.Bundle
 import android.os.Environment
@@ -82,6 +88,14 @@ class MainActivity : AppCompatActivity() {
         var fallbackUrl: String? = null
         var pendingUrl: String? = null
         var favicon: Bitmap? = null
+        var opener: Tab? = null
+        var errorUrl: String? = null
+        var sslBlocked = false
+
+        fun clearError() {
+            errorUrl = null
+            sslBlocked = false
+        }
     }
 
     private lateinit var ui: ActivityMainBinding
@@ -89,6 +103,7 @@ class MainActivity : AppCompatActivity() {
     private val defaultUa by lazy { WebSettings.getDefaultUserAgent(this) }
     private val omniBg by lazy { ui.omnibox.background.mutate() as GradientDrawable }
     private val tabs = mutableListOf<Tab>()
+    private var authDialog: Dialog? = null
     private lateinit var current: Tab
     private val web get() = current.web
     private var clearShown = false
@@ -265,7 +280,7 @@ class MainActivity : AppCompatActivity() {
         if (index < 0) return
         tabs.removeAt(index)
         if (tabs.isEmpty()) newTab(home())
-        else if (tab === current) select(tabs[minOf(index, tabs.lastIndex)])
+        else if (tab === current) select(tab.opener?.takeIf { it in tabs } ?: tabs[minOf(index, tabs.lastIndex)])
         destroy(tab)
         updateTabCount()
     }
@@ -625,6 +640,7 @@ class MainActivity : AppCompatActivity() {
     // region history and suggestions
 
     private fun recordVisit(tab: Tab, url: String?) {
+        if (url != null && url == tab.errorUrl) return
         if (url == null || !prefs.getBoolean(Prefs.SAVE_HISTORY, true)) return
         History.record(this, tab.title.ifBlank { url }, url)
     }
@@ -757,7 +773,7 @@ class MainActivity : AppCompatActivity() {
             javaScriptCanOpenWindowsAutomatically = false
             builtInZoomControls = true
             displayZoomControls = false
-            setSupportMultipleWindows(false)
+            setSupportMultipleWindows(true)
             setGeolocationEnabled(false)
             setSafeBrowsingEnabled(true)
         }
@@ -772,6 +788,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val uri = request.url
+                if (request.isForMainFrame) tab.clearError()
                 return when (uri.scheme) {
                     "https" -> false
                     "http" -> {
@@ -799,18 +816,29 @@ class MainActivity : AppCompatActivity() {
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                 if (!request.isForMainFrame) return
+                val failed = request.url.toString()
                 val fallback = tab.fallbackUrl
-                if (fallback != null && request.url.toString() == tab.upgradedUrl) {
-                    tab.fallbackUrl = null
-                    view.loadUrl(fallback, headers())
-                } else if (tab === current) {
-                    notify(R.string.load_error)
+                when {
+                    fallback != null && failed == tab.upgradedUrl -> {
+                        tab.fallbackUrl = null
+                        view.loadUrl(fallback, headers())
+                    }
+                    tab.sslBlocked || failed == tab.errorUrl || error.description.contains("ERR_ABORTED") -> Unit
+                    else -> {
+                        val (title, detail) = errorStrings(error.errorCode, isPrivateHost(request.url.host))
+                        showError(tab, failed, title, detail, error.description.toString())
+                    }
                 }
             }
 
             override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
                 handler.cancel()
-                if (tab === current) notify(R.string.ssl_error)
+                tab.sslBlocked = true
+                showError(tab, error.url, getString(R.string.ssl_title), getString(R.string.ssl_detail), "SSL error ${error.primaryError}")
+            }
+
+            override fun onReceivedHttpAuthRequest(view: WebView, handler: HttpAuthHandler, host: String, realm: String?) {
+                askCredentials(view, handler, host, realm)
             }
 
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
@@ -820,6 +848,23 @@ class MainActivity : AppCompatActivity() {
         }
 
         tab.web.webChromeClient = object : WebChromeClient() {
+            override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message): Boolean {
+                if (!isUserGesture || tabs.size >= MAX_TABS) {
+                    notify(R.string.popup_blocked)
+                    return false
+                }
+                val popup = createTab()
+                popup.opener = tab
+                select(popup)
+                (resultMsg.obj as WebView.WebViewTransport).webView = popup.web
+                resultMsg.sendToTarget()
+                return true
+            }
+
+            override fun onCloseWindow(window: WebView) {
+                tabs.firstOrNull { it.web === window }?.let(::closeTab)
+            }
+
             override fun onProgressChanged(view: WebView, newProgress: Int) {
                 tab.progress = newProgress
                 if (tab === current) ui.progress.setProgressCompat(newProgress, true)
@@ -932,6 +977,87 @@ class MainActivity : AppCompatActivity() {
 
     // region navigation
 
+    private fun reload() {
+        val failed = current.errorUrl
+        if (failed != null) open(failed) else web.reload()
+    }
+
+    private fun errorStrings(code: Int, local: Boolean): Pair<String, String> {
+        val (title, detail) = when (code) {
+            WebViewClient.ERROR_HOST_LOOKUP -> R.string.err_dns_title to R.string.err_dns_detail
+            WebViewClient.ERROR_CONNECT, WebViewClient.ERROR_IO -> R.string.err_connect_title to R.string.err_connect_detail
+            WebViewClient.ERROR_TIMEOUT -> R.string.err_timeout_title to R.string.err_timeout_detail
+            WebViewClient.ERROR_FAILED_SSL_HANDSHAKE -> R.string.err_tls_title to R.string.err_tls_detail
+            WebViewClient.ERROR_REDIRECT_LOOP -> R.string.err_redirect_title to R.string.err_redirect_detail
+            WebViewClient.ERROR_BAD_URL, WebViewClient.ERROR_UNSUPPORTED_SCHEME -> R.string.err_url_title to R.string.err_url_detail
+            else -> R.string.err_generic_title to R.string.err_generic_detail
+        }
+        val hint = if (local && code == WebViewClient.ERROR_CONNECT) " " + getString(R.string.err_local_hint) else ""
+        return getString(title) to getString(detail) + hint
+    }
+
+    /** Replaces WebView's plain error page with one that follows the theme. */
+    private fun showError(tab: Tab, url: String, title: String, detail: String, technical: String) {
+        tab.errorUrl = url
+        fun hex(attr: Int) = String.format("#%06X", 0xFFFFFF and themeColor(attr))
+        fun esc(text: String) = TextUtils.htmlEncode(text)
+        val html = """
+            <!doctype html><html lang="en"><head><meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>${esc(title)}</title>
+            <style>
+            body { margin: 0; min-height: 100vh; box-sizing: border-box; padding: 32px; display: flex; flex-direction: column;
+                   justify-content: center; background: ${hex(R.attr.brisaBg)}; color: ${hex(R.attr.brisaOnBg)};
+                   font: 16px/1.5 system-ui, sans-serif; animation: in .24s cubic-bezier(.05, .7, .1, 1); }
+            @keyframes in { from { opacity: 0; transform: translateY(8px); } }
+            @media (prefers-reduced-motion: reduce) { body { animation: none; } }
+            svg { width: 48px; height: 48px; margin-bottom: 20px; fill: ${hex(R.attr.brisaMuted)}; }
+            h1 { font-size: 22px; font-weight: 500; margin: 0 0 4px; }
+            .host { margin: 0 0 16px; color: ${hex(R.attr.brisaAccent)}; word-break: break-all; }
+            p { margin: 0 0 24px; color: ${hex(R.attr.brisaMuted)}; }
+            a { align-self: flex-start; padding: 12px 24px; border-radius: 24px; text-decoration: none; font-weight: 500;
+                background: ${hex(R.attr.brisaAccent)}; color: ${hex(R.attr.brisaOnAccent)}; }
+            code { margin-top: 28px; font-size: 12px; color: ${hex(R.attr.brisaMuted)}; word-break: break-all; }
+            </style></head><body>
+            <svg viewBox="0 0 24 24"><path d="M1,21h22L12,2 1,21zM13,18h-2v-2h2v2zM13,14h-2v-4h2v4z"/></svg>
+            <h1>${esc(title)}</h1>
+            <div class="host">${esc(display(url).ifEmpty { url })}</div>
+            <p>${esc(detail)}</p>
+            <a href="${esc(url)}">${esc(getString(R.string.error_retry))}</a>
+            <code>${esc(technical)}</code>
+            </body></html>
+        """.trimIndent()
+        tab.web.loadDataWithBaseURL(url, html, "text/html", "utf-8", url)
+    }
+
+    /** Asks for a username and password, as a normal browser does for HTTP authentication. */
+    private fun askCredentials(view: WebView, handler: HttpAuthHandler, host: String, realm: String?) {
+        if (isFinishing || isDestroyed || authDialog?.isShowing == true) {
+            handler.cancel()
+            return
+        }
+        val form = DialogHttpAuthBinding.inflate(layoutInflater)
+        val bare = runCatching { Uri.parse("http://$host").host }.getOrNull() ?: host
+        val insecure = view.url?.startsWith("http://") == true && !isPrivateHost(bare)
+        form.authMessage.text = getString(R.string.auth_message, host) + if (realm.isNullOrBlank()) "" else "\n$realm"
+        form.authWarning.isVisible = insecure
+        authDialog = MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.auth_title)
+            .setView(form.root)
+            .setPositiveButton(R.string.auth_sign_in) { _, _ ->
+                handler.proceed(form.authUser.text?.toString().orEmpty(), form.authPass.text?.toString().orEmpty())
+            }
+            .setNegativeButton(android.R.string.cancel) { _, _ -> handler.cancel() }
+            .setOnCancelListener { handler.cancel() }
+            .setOnDismissListener { form.authPass.text?.clear() }
+            .create()
+            .also {
+                it.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+                it.show()
+            }
+        form.authUser.requestFocus()
+    }
+
     private fun headers(): Map<String, String> =
         if (prefs.getBoolean(Prefs.SEND_DNT, true)) mapOf("DNT" to "1", "Sec-GPC" to "1") else emptyMap()
 
@@ -940,6 +1066,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun open(url: String, tab: Tab = current) {
         val uri = Uri.parse(url)
+        tab.clearError()
         tab.fallbackUrl = null
         tab.upgradedUrl = null
         var target = url
@@ -993,7 +1120,7 @@ class MainActivity : AppCompatActivity() {
         ui.swipe.setColorSchemeColors(themeColor(R.attr.brisaAccent))
         ui.swipe.setProgressBackgroundColorSchemeColor(themeColor(R.attr.brisaPopup))
         ui.swipe.setOnChildScrollUpCallback { _, _ -> web.scrollY > 0 }
-        ui.swipe.setOnRefreshListener { web.reload() }
+        ui.swipe.setOnRefreshListener { reload() }
 
         ui.urlBar.setOnEditorActionListener { v, action, _ ->
             if (action == EditorInfo.IME_ACTION_GO) {
@@ -1117,7 +1244,7 @@ class MainActivity : AppCompatActivity() {
         bind(m.iconBack) { web.goBack() }
         bind(m.iconForward) { web.goForward() }
         bind(m.iconBookmark) { toggleBookmark() }
-        bind(m.iconReload) { if (current.loading) web.stopLoading() else web.reload() }
+        bind(m.iconReload) { if (current.loading) web.stopLoading() else reload() }
         bind(m.rowNewTab) { newTab(home()) }
         bind(m.rowFind) { openFind() }
         bind(m.rowShare) { share() }
@@ -1169,7 +1296,7 @@ class MainActivity : AppCompatActivity() {
     private fun toggleDesktop() {
         prefs.edit { putBoolean(Prefs.DESKTOP, !prefs.getBoolean(Prefs.DESKTOP, false)) }
         tabs.forEach(::applySettings)
-        web.reload()
+        reload()
     }
 
     private fun toggleBookmark() {
@@ -1284,6 +1411,7 @@ class MainActivity : AppCompatActivity() {
     private companion object {
         const val DESKTOP_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        const val MAX_TABS = 30
         const val MAX_BLOB = 26214400
         val PRIVATE_IP = Regex("^(127\\.|10\\.|192\\.168\\.|169\\.254\\.|172\\.(1[6-9]|2\\d|3[01])\\.)")
     }
