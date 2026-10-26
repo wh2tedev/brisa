@@ -9,7 +9,9 @@ Google is the default search engine. No analytics, no accounts, no third-party s
 - Find in page
 - Desktop site mode
 - Downloads through the system download manager
-- Bookmarks (stored on the device only)
+- Bookmarks and history, stored on the device only
+- Address bar suggestions computed locally from bookmarks and history
+- Pull to refresh
 - Material 3 motion: spring press feedback, animated menu, tab sheet and omnibox, shared-axis transitions
 - Connection indicator in the address bar (lock for HTTPS, warning for HTTP)
 - File uploads through the system picker, and fullscreen video
@@ -45,7 +47,7 @@ Cleartext traffic is allowed so that `localhost`, LAN addresses and dev servers 
 - `DNT` and `Sec-GPC` headers on top-level navigation (configurable).
 - Web permissions (camera, microphone, location) are always denied.
 - Non-web schemes (`intent:`, `file:`, `javascript:`, …) are blocked during navigation.
-- No browsing history is stored by the app and backups are disabled.
+- History stays on the device, can be turned off in Settings, and is erased by *Clear browsing data*. Address bar suggestions are computed locally; nothing is sent to Google until you submit a search. Backups are disabled.
 - Clear data on exit, or on demand.
 - The only permission requested is `INTERNET`.
 
@@ -66,7 +68,7 @@ The Origin Private File System is a separate feature and does not need this.
 ## Not yet implemented
 
 Private tabs are not possible with a plain `WebView`, which shares a single cookie store across the app.
-History, a bookmark manager with folders, and per-site permissions are not implemented.
+Bookmark folders and per-site permissions are not implemented.
 
 ## License
 

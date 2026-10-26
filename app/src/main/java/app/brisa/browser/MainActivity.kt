@@ -16,6 +16,7 @@ import android.net.Uri
 import android.net.http.SslError
 import android.os.Bundle
 import android.os.Environment
+import android.text.format.DateUtils
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.View
@@ -38,6 +39,7 @@ import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupWindow
 import android.widget.TextView
@@ -76,6 +78,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var current: Tab
     private val web get() = current.web
     private var clearShown = false
+    private var suggestShown = false
 
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var customView: View? = null
@@ -151,6 +154,7 @@ class MainActivity : AppCompatActivity() {
             translationY = dp(10).toFloat()
             animate().alpha(1f).translationY(0f).setDuration(Motion.MEDIUM).setInterpolator(Motion.decelerate).start()
         }
+        hideSuggestions()
         ui.urlBar.clearFocus()
         showUrl(tab.web.url)
         ui.progress.setProgressCompat(tab.progress, false)
@@ -176,6 +180,10 @@ class MainActivity : AppCompatActivity() {
     private fun goBack() {
         when {
             customView != null -> exitFullscreen()
+            ui.urlBar.hasFocus() -> {
+                ui.urlBar.clearFocus()
+                hideKeyboard(ui.urlBar)
+            }
             ui.findBar.isVisible -> closeFind()
             web.canGoBack() -> web.goBack()
             tabs.size > 1 -> closeTab(current)
@@ -294,13 +302,7 @@ class MainActivity : AppCompatActivity() {
         fun fill() {
             list.removeAllViews()
             val items = Bookmarks.all(this)
-            if (items.isEmpty()) {
-                list.addView(TextView(this).apply {
-                    setText(R.string.empty_bookmarks)
-                    setTextColor(getColor(R.color.muted))
-                    setPadding(dp(24), dp(12), dp(24), dp(12))
-                })
-            }
+            if (items.isEmpty()) list.addView(emptyView(R.string.empty_bookmarks))
             items.forEachIndexed { index, item ->
                 list.addView(row(
                     list, item.title.ifBlank { item.url }, display(item.url), index, true,
@@ -323,6 +325,128 @@ class MainActivity : AppCompatActivity() {
         smoothRemoval(list)
         sheet.setContentView(content)
         sheet.show()
+    }
+
+    // endregion
+
+    // region history and suggestions
+
+    private fun recordVisit(tab: Tab, url: String?) {
+        if (url == null || !prefs.getBoolean(Prefs.SAVE_HISTORY, true)) return
+        History.record(this, tab.title.ifBlank { url }, url)
+    }
+
+    private fun emptyView(text: Int) = TextView(this).apply {
+        setText(text)
+        setTextColor(getColor(R.color.muted))
+        setPadding(dp(24), dp(12), dp(24), dp(12))
+    }
+
+    private fun showHistory() {
+        val (sheet, content, list) = sheetContent(R.string.history)
+        val clearButton = content.findViewById<TextView>(R.id.newTab)
+        clearButton.setText(R.string.clear_history)
+
+        fun fill() {
+            list.removeAllViews()
+            val items = History.all(this).take(100)
+            if (items.isEmpty()) list.addView(emptyView(R.string.empty_history))
+            items.forEachIndexed { index, entry ->
+                val age = DateUtils.getRelativeTimeSpanString(
+                    entry.time, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS,
+                )
+                list.addView(row(
+                    list, entry.title.ifBlank { entry.url }, "${display(entry.url)} · $age",
+                    minOf(index, 10), true,
+                    onOpen = {
+                        open(entry.url)
+                        sheet.dismiss()
+                    },
+                    onClose = { row ->
+                        slideOut(row) {
+                            History.remove(this, entry.url)
+                            list.removeView(row)
+                            if (list.childCount == 0) fill()
+                        }
+                    },
+                ))
+            }
+        }
+
+        clearButton.pressable(0.95f)
+        clearButton.setOnClickListener {
+            History.clear(this)
+            fill()
+        }
+        fill()
+        smoothRemoval(list)
+        sheet.setContentView(content)
+        sheet.show()
+    }
+
+    private fun renderSuggestions(query: String) {
+        val q = query.trim()
+        if (q.isEmpty()) {
+            hideSuggestions()
+            return
+        }
+        ui.suggestions.removeAllViews()
+        val target = resolve(q)
+        val isSearch = target.startsWith("https://www.google.com/search")
+        ui.suggestions.addView(
+            suggestionRow(
+                if (isSearch) R.drawable.ic_search else R.drawable.ic_arrow_forward,
+                q,
+                if (isSearch) getString(R.string.search_google) else target,
+            ) { open(target) },
+        )
+        val seen = mutableSetOf<String>()
+        val bookmarks = Bookmarks.all(this).filter { matches(it.title, it.url, q) }
+            .map { Triple(R.drawable.ic_star, it.title, it.url) }
+        val visited = History.all(this).filter { matches(it.title, it.url, q) }
+            .map { Triple(R.drawable.ic_history, it.title, it.url) }
+        (bookmarks + visited).filter { seen.add(it.third) }.take(5).forEach { (icon, title, url) ->
+            ui.suggestions.addView(suggestionRow(icon, title.ifBlank { url }, display(url)) { open(url) })
+        }
+        showSuggestions()
+    }
+
+    private fun matches(title: String, url: String, query: String) =
+        title.contains(query, ignoreCase = true) || url.contains(query, ignoreCase = true)
+
+    private fun suggestionRow(icon: Int, title: String, subtitle: String, onClick: () -> Unit): View {
+        val row = layoutInflater.inflate(R.layout.item_suggestion, ui.suggestions, false)
+        row.findViewById<ImageView>(R.id.suggestIcon).setImageResource(icon)
+        row.findViewById<TextView>(R.id.suggestTitle).text = title
+        row.findViewById<TextView>(R.id.suggestSubtitle).apply {
+            text = subtitle
+            isGone = subtitle.isEmpty()
+        }
+        row.setOnClickListener {
+            onClick()
+            ui.urlBar.clearFocus()
+            hideKeyboard(ui.urlBar)
+        }
+        return row
+    }
+
+    private fun showSuggestions() {
+        if (suggestShown) return
+        suggestShown = true
+        ui.suggestions.animate().cancel()
+        ui.suggestions.alpha = 0f
+        ui.suggestions.translationY = -dp(8).toFloat()
+        ui.suggestions.isVisible = true
+        ui.suggestions.animate().alpha(1f).translationY(0f).setDuration(Motion.SHORT)
+            .setInterpolator(Motion.decelerate).start()
+    }
+
+    private fun hideSuggestions() {
+        if (!suggestShown) return
+        suggestShown = false
+        ui.suggestions.animate().cancel()
+        ui.suggestions.animate().alpha(0f).translationY(-dp(8).toFloat()).setDuration(100)
+            .withEndAction { if (!suggestShown) ui.suggestions.isGone = true }.start()
     }
 
     // endregion
@@ -368,6 +492,7 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView, url: String?) {
                 setLoading(tab, false)
                 if (tab === current) showUrl(url)
+                recordVisit(tab, url)
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
@@ -400,6 +525,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onReceivedTitle(view: WebView, title: String?) {
                 tab.title = title.orEmpty()
+                recordVisit(tab, view.url)
             }
 
             override fun onShowFileChooser(
@@ -485,6 +611,7 @@ class MainActivity : AppCompatActivity() {
         current.web.clearCache(true)
         tabs.forEach { it.web.clearHistory() }
         WebStorage.getInstance().deleteAllData()
+        History.clear(this)
         CookieManager.getInstance().apply {
             removeAllCookies(null)
             flush()
@@ -554,6 +681,11 @@ class MainActivity : AppCompatActivity() {
     private fun setupBars() {
         listOf(ui.tabsButton, ui.menu, ui.clearUrl, ui.findPrev, ui.findNext, ui.findClose).forEach { it.pressable() }
 
+        ui.swipe.setColorSchemeColors(getColor(R.color.accent))
+        ui.swipe.setProgressBackgroundColorSchemeColor(getColor(R.color.popup))
+        ui.swipe.setOnChildScrollUpCallback { _, _ -> web.scrollY > 0 }
+        ui.swipe.setOnRefreshListener { web.reload() }
+
         ui.urlBar.setOnEditorActionListener { v, action, _ ->
             if (action == EditorInfo.IME_ACTION_GO) {
                 open(resolve(v.text.toString()))
@@ -566,10 +698,16 @@ class MainActivity : AppCompatActivity() {
             ui.urlBar.setText(if (focused) web.url.orEmpty() else display(web.url))
             if (focused) ui.urlBar.selectAll()
             animateFocus(focused)
+            if (!focused) hideSuggestions()
             updateSiteIcon(web.url)
             updateClear()
         }
-        ui.urlBar.doOnTextChanged { _, _, _, _ -> updateClear() }
+        ui.urlBar.doOnTextChanged { text, _, _, _ ->
+            updateClear()
+            val typed = text?.toString().orEmpty()
+            if (ui.urlBar.hasFocus() && typed.isNotEmpty() && typed != web.url.orEmpty()) renderSuggestions(typed)
+            else hideSuggestions()
+        }
         ui.clearUrl.setOnClickListener { ui.urlBar.text?.clear() }
         ui.tabsButton.setOnClickListener { showTabs() }
         ui.menu.setOnClickListener { showMenu() }
@@ -675,6 +813,7 @@ class MainActivity : AppCompatActivity() {
         bind(m.rowFind) { openFind() }
         bind(m.rowShare) { share() }
         bind(m.rowBookmarks) { showBookmarks() }
+        bind(m.rowHistory) { showHistory() }
         bind(m.rowSettings) {
             val options = ActivityOptions.makeCustomAnimation(this, R.anim.enter_from_right, R.anim.exit_to_left)
             startActivity(Intent(this, SettingsActivity::class.java), options.toBundle())
@@ -685,7 +824,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val items = listOf<View>(
-            m.iconRow, m.rowNewTab, m.rowFind, m.rowShare, m.rowBookmarks, m.rowDesktop, m.rowSettings,
+            m.iconRow, m.rowNewTab, m.rowFind, m.rowShare, m.rowBookmarks, m.rowHistory, m.rowDesktop, m.rowSettings,
         )
         m.card.doOnLayout { card ->
             card.pivotX = card.width.toFloat()
@@ -794,6 +933,7 @@ class MainActivity : AppCompatActivity() {
             ui.progress.alpha = 1f
             ui.progress.isVisible = true
         } else {
+            ui.swipe.isRefreshing = false
             ui.progress.animate().alpha(0f).setDuration(260).setStartDelay(120)
                 .withEndAction { ui.progress.isGone = true }.start()
         }

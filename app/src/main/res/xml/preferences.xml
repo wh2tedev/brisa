@@ -20,6 +20,12 @@
             app:summary="@string/pref_dnt_sum"
             app:iconSpaceReserved="false" />
         <SwitchPreferenceCompat
+            app:key="save_history"
+            app:defaultValue="true"
+            app:title="@string/pref_save_history"
+            app:summary="@string/pref_save_history_sum"
+            app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat
             app:key="clear_on_exit"
             app:defaultValue="false"
             app:title="@string/pref_clear_exit"

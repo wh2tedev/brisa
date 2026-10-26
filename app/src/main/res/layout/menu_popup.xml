@@ -84,6 +84,11 @@
             style="@style/MenuRow"
             android:text="@string/bookmarks" />
 
+        <TextView
+            android:id="@+id/rowHistory"
+            style="@style/MenuRow"
+            android:text="@string/history" />
+
         <LinearLayout
             android:id="@+id/rowDesktop"
             android:layout_width="match_parent"
