@@ -15,11 +15,14 @@ Google is the default search engine. No analytics, no accounts, no third-party s
 - Material 3 motion: spring press feedback, animated menu, tab sheet and omnibox, shared-axis transitions
 - Connection indicator in the address bar (lock for HTTPS, warning for HTTP)
 - File uploads through the system picker, and fullscreen video
+- Tabs are restored on launch (only the selected tab loads until you open the others)
+- Download confirmation, including `data:` and `blob:` downloads
+- Tracker and ad blocking for third-party requests, on by default
 - Opens `http` and `https` links from other apps
 
 ## Building
 
-Requirements: JDK 17 and Android SDK 34.
+Requirements: JDK 17 and Android SDK platform 37.
 
 - **Android Studio:** open the project folder and press *Run*.
 - **Command line:** `gradle assembleDebug` (Gradle 8.7). The APK is written to `app/build/outputs/apk/debug/`.
@@ -44,6 +47,8 @@ Cleartext traffic is allowed so that `localhost`, LAN addresses and dev servers 
 - Certificate errors cancel the load, with no option to proceed.
 - Safe Browsing enabled; local file and content provider access disabled.
 - Third-party cookies blocked by default.
+- Third-party requests to known ad and tracking domains are blocked (`app/src/main/assets/blocklist.txt`, editable in Settings).
+- Downloads always ask for confirmation. `blob:` downloads use a one-time token and are capped at 25 MB.
 - `DNT` and `Sec-GPC` headers on top-level navigation (configurable).
 - Web permissions (camera, microphone, location) are always denied.
 - Non-web schemes (`intent:`, `file:`, `javascript:`, …) are blocked during navigation.
@@ -60,10 +65,14 @@ Never commit the keystore or `keystore.properties`.
 
 ## File System Access API
 
-`showOpenFilePicker()`, `showSaveFilePicker()` and `showDirectoryPicker()` reach Android WebView through
-the same file chooser callback used for `<input type="file">`, which Brisa implements. Whether they work
-depends on the installed WebView version, and save and folder pickers are limited on Android.
-The Origin Private File System is a separate feature and does not need this.
+`showOpenFilePicker()`, `showSaveFilePicker()` and `showDirectoryPicker()` reach an app through the WebView
+file chooser callback. Brisa maps open, save and folder requests, plus the read/write hint, to the system
+document pickers. Google keeps the API disabled for apps by default, because older apps would not understand
+the new modes. The folder mode and read/write hint were added in Android 17 (API 37), so Brisa targets API 37.
+Where the installed Android or WebView does not enable the API, pages simply see it as unavailable and
+ordinary `<input type="file">` uploads keep working. Android file providers do not support every operation
+(for example atomic writes), so some web apps behave differently than on desktop.
+The Origin Private File System is a separate feature and does not need any of this.
 
 ## Not yet implemented
 

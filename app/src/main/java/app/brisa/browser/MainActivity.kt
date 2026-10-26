@@ -2,6 +2,17 @@ package app.brisa.browser
 
 import android.animation.LayoutTransition
 import android.animation.ValueAnimator
+import android.content.ContentValues
+import android.os.Build
+import android.provider.MediaStore
+import android.text.format.Formatter
+import android.util.Base64
+import android.webkit.WebResourceResponse
+import androidx.core.view.ViewCompat
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import org.json.JSONObject
+import java.io.ByteArrayInputStream
+import java.util.UUID
 import android.app.ActivityOptions
 import android.app.DownloadManager
 import android.content.ActivityNotFoundException
@@ -68,6 +79,7 @@ class MainActivity : AppCompatActivity() {
         var progress = 0
         var upgradedUrl: String? = null
         var fallbackUrl: String? = null
+        var pendingUrl: String? = null
     }
 
     private lateinit var ui: ActivityMainBinding
@@ -79,6 +91,19 @@ class MainActivity : AppCompatActivity() {
     private val web get() = current.web
     private var clearShown = false
     private var suggestShown = false
+    private var blobToken: String? = null
+    private var blobName = ""
+    private val blobBridge = BlobBridge(
+        onSave = { token, mime, data -> runOnUiThread { finishBlob(token, mime, data) } },
+        onFail = { token ->
+            runOnUiThread {
+                if (token == blobToken) {
+                    blobToken = null
+                    notify(R.string.download_failed)
+                }
+            }
+        },
+    )
 
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var customView: View? = null
@@ -97,7 +122,19 @@ class MainActivity : AppCompatActivity() {
 
         setupBars()
         onBackPressedDispatcher.addCallback(this) { goBack() }
-        newTab(externalUrl(intent) ?: HOME)
+
+        ViewCompat.setOnApplyWindowInsetsListener(ui.content) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            view.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom))
+            WindowInsetsCompat.CONSUMED
+        }
+
+        Blocklist.load(this)
+        val external = externalUrl(intent)
+        val saved = Session.load(this)?.takeIf { restoreEnabled() }
+        saved?.let(::restore)
+        if (external != null) newTab(external) else if (saved == null) newTab(HOME)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -117,6 +154,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         web.onPause()
+        saveSession()
         CookieManager.getInstance().flush()
         super.onPause()
     }
@@ -130,7 +168,7 @@ class MainActivity : AppCompatActivity() {
 
     // region tabs
 
-    private fun newTab(url: String) {
+    private fun createTab(): Tab {
         val tab = Tab(WebView(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -139,8 +177,35 @@ class MainActivity : AppCompatActivity() {
         })
         configure(tab)
         tabs += tab
+        return tab
+    }
+
+    private fun newTab(url: String) {
+        val tab = createTab()
         select(tab)
         open(url, tab)
+    }
+
+    /** Recreates saved tabs without loading them; a tab loads when it is first selected. */
+    private fun restore(saved: Session.Saved) {
+        saved.tabs.forEach { entry ->
+            createTab().apply {
+                title = entry.title
+                pendingUrl = entry.url
+            }
+        }
+        select(tabs[saved.current.coerceIn(0, tabs.lastIndex)])
+    }
+
+    private fun restoreEnabled() =
+        prefs.getBoolean(Prefs.RESTORE_TABS, true) && !prefs.getBoolean(Prefs.CLEAR_ON_EXIT, false)
+
+    private fun saveSession() {
+        if (!restoreEnabled()) {
+            Session.clear(this)
+            return
+        }
+        Session.save(this, tabs.map { Session.Entry(titleOf(it), urlOf(it) ?: HOME) }, tabs.indexOf(current))
     }
 
     private fun select(tab: Tab) {
@@ -156,10 +221,14 @@ class MainActivity : AppCompatActivity() {
         }
         hideSuggestions()
         ui.urlBar.clearFocus()
-        showUrl(tab.web.url)
+        showUrl(urlOf(tab))
         ui.progress.setProgressCompat(tab.progress, false)
         renderLoading()
         updateTabCount()
+        tab.pendingUrl?.let {
+            tab.pendingUrl = null
+            open(it, tab)
+        }
     }
 
     private fun closeTab(tab: Tab) {
@@ -201,8 +270,10 @@ class MainActivity : AppCompatActivity() {
         ui.tabCount.animate().scaleX(1f).scaleY(1f).setDuration(320).setInterpolator(OvershootInterpolator(3f)).start()
     }
 
+    private fun urlOf(tab: Tab): String? = tab.web.url ?: tab.pendingUrl
+
     private fun titleOf(tab: Tab): String =
-        tab.title.ifBlank { display(tab.web.url) }.ifBlank { getString(R.string.new_tab) }
+        tab.title.ifBlank { display(urlOf(tab)) }.ifBlank { getString(R.string.new_tab) }
 
     // endregion
 
@@ -264,7 +335,7 @@ class MainActivity : AppCompatActivity() {
             list.removeAllViews()
             tabs.toList().forEachIndexed { index, tab ->
                 val view = row(
-                    list, titleOf(tab), display(tab.web.url), index, animate,
+                    list, titleOf(tab), display(urlOf(tab)), index, animate,
                     onOpen = {
                         select(tab)
                         sheet.dismiss()
@@ -325,6 +396,131 @@ class MainActivity : AppCompatActivity() {
         smoothRemoval(list)
         sheet.setContentView(content)
         sheet.show()
+    }
+
+    // endregion
+
+    // region downloads and file access
+
+    private fun startDownload(
+        source: WebView,
+        url: String,
+        userAgent: String,
+        disposition: String?,
+        mime: String?,
+        length: Long,
+    ) {
+        val name = URLUtil.guessFileName(if (url.startsWith("http")) url else "download", disposition, mime)
+        when {
+            url.startsWith("https://") || url.startsWith("http://") -> confirmDownload(name, length) {
+                val request = DownloadManager.Request(Uri.parse(url))
+                    .setMimeType(mime)
+                    .addRequestHeader("User-Agent", userAgent)
+                    .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                    .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
+                CookieManager.getInstance().getCookie(url)?.let { request.addRequestHeader("Cookie", it) }
+                getSystemService(DownloadManager::class.java).enqueue(request)
+                notify(R.string.downloading)
+            }
+            url.startsWith("data:") -> {
+                val decoded = decodeDataUrl(url) ?: return notify(R.string.download_failed)
+                confirmDownload(name, decoded.second.size.toLong()) {
+                    saveToDownloads(name, decoded.first, decoded.second)
+                }
+            }
+            url.startsWith("blob:") -> confirmDownload(name, length) {
+                val token = UUID.randomUUID().toString()
+                blobToken = token
+                blobName = name
+                source.evaluateJavascript(blobScript(url, token), null)
+            }
+        }
+    }
+
+    private fun confirmDownload(name: String, size: Long, onConfirm: () -> Unit) {
+        val detail = if (size > 0) Formatter.formatShortFileSize(this, size) else getString(R.string.unknown_size)
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.download_title)
+            .setMessage("$name\n$detail")
+            .setPositiveButton(R.string.download) { _, _ -> onConfirm() }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun blobScript(url: String, token: String) = """
+        (function (url, token) {
+            fetch(url).then(function (r) { return r.blob(); }).then(function (b) {
+                if (b.size > $MAX_BLOB) { BrisaBlob.fail(token); return; }
+                var reader = new FileReader();
+                reader.onloadend = function () {
+                    BrisaBlob.save(token, b.type || 'application/octet-stream', String(reader.result).split(',')[1] || '');
+                };
+                reader.readAsDataURL(b);
+            }).catch(function () { BrisaBlob.fail(token); });
+        })(${JSONObject.quote(url)}, ${JSONObject.quote(token)});
+    """.trimIndent()
+
+    private fun finishBlob(token: String, mime: String, data: String) {
+        if (token != blobToken) return
+        blobToken = null
+        val bytes = runCatching { Base64.decode(data, Base64.DEFAULT) }.getOrNull()
+            ?: return notify(R.string.download_failed)
+        saveToDownloads(blobName, mime, bytes)
+    }
+
+    private fun decodeDataUrl(url: String): Pair<String, ByteArray>? = runCatching {
+        val comma = url.indexOf(',')
+        val meta = url.substring(5, comma)
+        val body = url.substring(comma + 1)
+        val mime = meta.substringBefore(';').ifEmpty { "text/plain" }
+        val bytes = if (meta.endsWith(";base64")) Base64.decode(body, Base64.DEFAULT) else Uri.decode(body).toByteArray()
+        mime to bytes
+    }.getOrNull()
+
+    private fun saveToDownloads(name: String, mime: String, bytes: ByteArray) {
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, name)
+            put(MediaStore.Downloads.MIME_TYPE, mime)
+            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+        }
+        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        val saved = uri != null && runCatching {
+            contentResolver.openOutputStream(uri)?.use { it.write(bytes) } != null
+        }.getOrDefault(false)
+        notify(if (saved) R.string.saved_to_downloads else R.string.download_failed)
+    }
+
+    /**
+     * Maps a WebView file request to a system picker. The folder and save modes, and the read/write hint,
+     * are what the File System Access API needs; they only arrive on Android 17 (API 37) and later.
+     */
+    private fun chooserIntent(params: WebChromeClient.FileChooserParams): Intent {
+        val writable = Build.VERSION.SDK_INT >= 37 &&
+            params.permissionMode == WebChromeClient.FileChooserParams.PERMISSION_MODE_READ_WRITE
+        val read = Intent.FLAG_GRANT_READ_URI_PERMISSION
+        val readWrite = read or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        val mimes = params.acceptTypes.filter { '/' in it }
+        return when (params.mode) {
+            WebChromeClient.FileChooserParams.MODE_OPEN_FOLDER ->
+                Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(if (writable) readWrite else read)
+            WebChromeClient.FileChooserParams.MODE_SAVE ->
+                Intent(Intent.ACTION_CREATE_DOCUMENT)
+                    .addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType(mimes.firstOrNull() ?: "*/*")
+                    .putExtra(Intent.EXTRA_TITLE, params.filenameHint.orEmpty())
+                    .addFlags(readWrite)
+            else -> if (writable) {
+                Intent(Intent.ACTION_OPEN_DOCUMENT)
+                    .addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType(if (mimes.size == 1) mimes[0] else "*/*")
+                    .putExtra(
+                        Intent.EXTRA_ALLOW_MULTIPLE,
+                        params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE,
+                    )
+                    .apply { if (mimes.size > 1) putExtra(Intent.EXTRA_MIME_TYPES, mimes.toTypedArray()) }
+                    .addFlags(readWrite)
+            } else params.createIntent()
+        }
     }
 
     // endregion
@@ -469,6 +665,12 @@ class MainActivity : AppCompatActivity() {
         applySettings(tab)
 
         tab.web.webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                if (request.isForMainFrame || !prefs.getBoolean(Prefs.BLOCK_TRACKERS, true)) return null
+                if (!Blocklist.isBlocked(request.url.host)) return null
+                return WebResourceResponse("text/plain", "utf-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val uri = request.url
                 return when (uri.scheme) {
@@ -536,7 +738,7 @@ class MainActivity : AppCompatActivity() {
                 fileCallback?.onReceiveValue(null)
                 fileCallback = callback
                 try {
-                    filePicker.launch(params.createIntent())
+                    filePicker.launch(chooserIntent(params))
                 } catch (e: ActivityNotFoundException) {
                     fileCallback = null
                     callback.onReceiveValue(null)
@@ -577,19 +779,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        tab.web.setDownloadListener { url, userAgent, disposition, mime, _ ->
-            if (!url.startsWith("https://") && !url.startsWith("http://")) return@setDownloadListener
-            val request = DownloadManager.Request(Uri.parse(url))
-                .setMimeType(mime)
-                .addRequestHeader("User-Agent", userAgent)
-                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setDestinationInExternalPublicDir(
-                    Environment.DIRECTORY_DOWNLOADS,
-                    URLUtil.guessFileName(url, disposition, mime),
-                )
-            CookieManager.getInstance().getCookie(url)?.let { request.addRequestHeader("Cookie", it) }
-            getSystemService(DownloadManager::class.java).enqueue(request)
-            notify(R.string.downloading)
+        tab.web.addJavascriptInterface(blobBridge, "BrisaBlob")
+        tab.web.setDownloadListener { url, userAgent, disposition, mime, length ->
+            startDownload(tab.web, url, userAgent, disposition, mime, length)
         }
     }
 
@@ -947,6 +1139,7 @@ class MainActivity : AppCompatActivity() {
         const val HOME = "https://www.google.com"
         const val DESKTOP_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        const val MAX_BLOB = 26214400
         val PRIVATE_IP = Regex("^(127\\.|10\\.|192\\.168\\.|169\\.254\\.|172\\.(1[6-9]|2\\d|3[01])\\.)")
     }
 }

@@ -12,14 +12,14 @@ val keystoreProps = Properties().apply {
 
 android {
     namespace = "app.brisa.browser"
-    compileSdk = 34
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "app.brisa.browser"
         minSdk = 29
-        targetSdk = 34
-        versionCode = 5
-        versionName = "0.5.0"
+        targetSdk = 37
+        versionCode = 6
+        versionName = "0.6.0"
     }
 
     signingConfigs {

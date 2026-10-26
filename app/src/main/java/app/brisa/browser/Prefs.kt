@@ -3,6 +3,8 @@ package app.brisa.browser
 object Prefs {
     const val JAVASCRIPT = "javascript"
     const val HTTPS_FIRST = "https_first"
+    const val BLOCK_TRACKERS = "block_trackers"
+    const val RESTORE_TABS = "restore_tabs"
     const val SAVE_HISTORY = "save_history"
     const val BLOCK_THIRD_PARTY = "block_third_party"
     const val SEND_DNT = "send_dnt"

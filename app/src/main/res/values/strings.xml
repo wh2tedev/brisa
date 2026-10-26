@@ -50,4 +50,13 @@
     <string name="search_google">Search Google</string>
     <string name="pref_save_history">Save browsing history</string>
     <string name="pref_save_history_sum">Stored only on this device and used for suggestions</string>
+    <string name="pref_block_trackers">Block trackers and ads</string>
+    <string name="pref_block_trackers_sum">Blocks third-party requests to known ad and tracking domains. May break some sites</string>
+    <string name="pref_restore_tabs">Restore tabs on launch</string>
+    <string name="pref_restore_tabs_sum">Reopens the tabs you had open. Ignored when clearing data on exit</string>
+    <string name="download_title">Download file?</string>
+    <string name="download">Download</string>
+    <string name="unknown_size">Unknown size</string>
+    <string name="download_failed">Download failed</string>
+    <string name="saved_to_downloads">Saved to Downloads</string>
 </resources>
