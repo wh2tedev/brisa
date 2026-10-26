@@ -22,13 +22,14 @@ Google is the default search engine. No analytics, no accounts, no third-party s
 
 ## Building
 
-Requirements: JDK 17 and Android SDK platform 37.
+Requirements: JDK 17 and Android SDK platform 37.0 (`sdkmanager "platforms;android-37.0" "build-tools;37.0.0"`).
+Android 17 is published only as minor-versioned platforms, which needs Android Gradle Plugin 8.13 or newer.
 
 - **Android Studio:** open the project folder and press *Run*.
-- **Command line:** `gradle assembleDebug` (Gradle 8.7). The APK is written to `app/build/outputs/apk/debug/`.
+- **Command line:** `gradle assembleDebug` (Gradle 8.13). The APK is written to `app/build/outputs/apk/debug/`.
 - **GitHub Actions:** `.github/workflows/build.yml` builds the APK and uploads it as an artifact.
 
-To generate the Gradle wrapper: `gradle wrapper --gradle-version 8.7`.
+To generate the Gradle wrapper: `gradle wrapper --gradle-version 8.13`.
 
 ## HTTP, HTTPS and local development
 

@@ -12,7 +12,9 @@ val keystoreProps = Properties().apply {
 
 android {
     namespace = "app.brisa.browser"
-    compileSdk = 37
+    compileSdk {
+        version = release(37) { minorApiLevel = 0 }
+    }
 
     defaultConfig {
         applicationId = "app.brisa.browser"
