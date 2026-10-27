@@ -1,7 +1,7 @@
 # Brisa
 
 A minimal Android browser built on `WebView`, with Material 3 and a Chrome-style dark theme.
-Google is the default search engine. No analytics, no accounts, no third-party services.
+Google is the default search engine, and you can change it. No analytics, no accounts and no servers of its own: Brisa talks only to the sites you visit and the search engine you choose. See [PRIVACY.md](PRIVACY.md).
 
 ## Features
 
@@ -27,7 +27,7 @@ Google is the default search engine. No analytics, no accounts, no third-party s
 - File uploads through the system picker, and fullscreen video
 - Tabs are restored on launch (only the selected tab loads until you open the others)
 - Optional download confirmation, including `data:` and `blob:` downloads
-- Tracker and ad blocking for third-party requests, on by default
+- Tracker and ad blocking for third-party requests (Off, Standard or Strict), with per-site exceptions and a count of what was blocked on each page
 - Opens `http` and `https` links from other apps
 
 ## Building
@@ -65,7 +65,7 @@ Cleartext traffic is allowed so that `localhost`, LAN addresses and dev servers 
 - Non-web schemes (`intent:`, `file:`, `javascript:`, …) are blocked during navigation.
 - History stays on the device, can be turned off in Settings, and is erased by *Clear browsing data*. Address bar suggestions are computed locally; nothing is sent to Google until you submit a search. Backups are disabled.
 - Clear data on exit, or on demand.
-- The only permission requested is `INTERNET`.
+- Brisa asks for internet access. Libraries it uses add a few more (background downloads, screen-lock authentication). The build fails if camera, microphone, location, contacts, SMS, phone or storage permissions appear, and each release publishes its permission list.
 
 ## Release builds
 

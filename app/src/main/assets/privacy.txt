@@ -1,0 +1,60 @@
+PRIVACY POLICY
+
+Last updated: October 27, 2026. Applies to Brisa 0.10.0 and later.
+
+In short: Brisa has no accounts and no servers of its own, and it sends nothing to its maintainers. It connects to the sites you visit and to the search engine you choose, and it keeps your data on your device.
+
+
+WHAT BRISA STORES ON YOUR DEVICE
+
+- Bookmarks you add.
+- Browsing history, if Save browsing history is on. It is used for address-bar suggestions. You can turn it off or clear it.
+- Your open tabs, if Restore tabs on launch is on.
+- Your settings, the sites where you turned tracker blocking off, and your download folder choice.
+- The list of your downloads. The files themselves are in the folder you chose.
+- Cookies, cache and site data kept by the system WebView for the sites you visit.
+- Whether app lock is on. Your fingerprint, face or screen-lock code is handled by Android. Brisa never sees or stores it.
+
+Brisa disables Android backups, so this data is not copied to cloud backups by the app. Uninstalling Brisa removes it. Downloaded files stay in your folder.
+
+
+WHAT LEAVES YOUR DEVICE
+
+- Requests to websites. Opening a page contacts that site and the other servers the page loads things from (images, scripts, ads), except those the tracker blocker stops. Those servers see your IP address and normal browser details, and may set cookies. Brisa sends Do Not Track and Global Privacy Control signals unless you turn that off, but sites may ignore them.
+- Searches. Text you submit in the address bar goes to the search engine you picked (Google by default). Suggestions as you type are computed on your device and are not sent anywhere.
+- Safe Browsing. When it is available, the system WebView may check addresses against Google Safe Browsing. The WebView does this, not Brisa, and it sends partial, hashed address information to Google. It needs Google Play services and may be unavailable on some devices.
+- Page rendering and updates. Web pages are drawn by Android System WebView, which Google or your device maker updates through their own channels. Brisa does not control that.
+- Downloads come from the server that hosts the file.
+
+
+WHAT BRISA DOES NOT DO
+
+- No analytics, crash reports, advertising or tracking of any kind inside the app.
+- No accounts, no sign-in and no sync.
+- No selling or sharing of data. Brisa has no data to share.
+- Websites that ask for your camera, microphone or location are always refused.
+
+
+PERMISSIONS
+
+Brisa asks for internet access. Some libraries it uses add a few more, for example to finish downloads in the background and to use screen-lock authentication. Brisa does not request camera, microphone, location, contacts, SMS, phone or storage permissions, and the build fails if one of them appears. The full list is published with every release.
+
+
+YOUR CHOICES AND DELETING DATA
+
+In Settings > Privacy you can clear browsing data (history, cookies and site data, cache, download list), turn off history, turn off tab restore, change tracker blocking and manage the sites without it, hide Brisa in recent apps, and turn app lock on or off. Bookmarks can be removed from the Bookmarks list. Uninstalling Brisa removes everything it stored.
+
+
+THE PROJECT WEBSITE
+
+The website has no analytics and sets no cookies. It remembers your theme choice in your browser's local storage, on your device only, and it loads no third-party fonts or scripts. GitHub, where the code and releases are hosted, has its own privacy policy.
+
+
+CHILDREN
+
+Brisa is a general-purpose browser and is not aimed at children.
+
+
+CHANGES AND CONTACT
+
+Changes to this policy appear in the repository history. For questions, open an issue on GitHub. For security problems, use private vulnerability reporting (see SECURITY.md).

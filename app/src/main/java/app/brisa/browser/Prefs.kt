@@ -6,7 +6,8 @@ import android.net.Uri
 object Prefs {
     const val JAVASCRIPT = "javascript"
     const val HTTPS_FIRST = "https_first"
-    const val BLOCK_TRACKERS = "block_trackers"
+    const val TRACKER_LEVEL = "tracker_level"
+    const val SITE_EXCEPTIONS = "site_exceptions"
     const val RESTORE_TABS = "restore_tabs"
     const val SAVE_HISTORY = "save_history"
     const val HIDE_PREVIEW = "hide_preview"

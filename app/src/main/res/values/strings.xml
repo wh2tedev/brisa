@@ -50,8 +50,6 @@
     <string name="search_with">Search with %1$s</string>
     <string name="pref_save_history">Save browsing history</string>
     <string name="pref_save_history_sum">Stored only on this device and used for suggestions</string>
-    <string name="pref_block_trackers">Block trackers and ads</string>
-    <string name="pref_block_trackers_sum">Blocks third-party requests to known ad and tracking domains. May break some sites</string>
     <string name="pref_restore_tabs">Restore tabs on launch</string>
     <string name="pref_restore_tabs_sum">Reopens the tabs you had open. Ignored when clearing data on exit</string>
     <string name="download_title">Download file?</string>
@@ -185,4 +183,14 @@
     <string name="lock_open_settings">Open settings</string>
     <string name="lock_unavailable">Authentication isn\'t available right now. Try again in a moment.</string>
     <string name="lock_disabled">App lock was turned off because this device has no screen lock</string>
+    <string name="pref_tracker_level">Tracker and ad blocking</string>
+    <string name="pref_site_exceptions">Sites without blocking</string>
+    <string name="site_exceptions_count">%1$d sites</string>
+    <string name="site_exceptions_none">No sites yet. Turn blocking off for a site from the menu.</string>
+    <string name="exceptions_save">Save</string>
+    <string name="blocked_on_page">%1$d blocked on this page</string>
+    <string name="protection_row">Block trackers on this site</string>
+    <string name="protection_off_site">Off for this site</string>
+    <string name="pref_privacy_policy">Privacy policy</string>
+    <string name="pref_privacy_policy_sum">What Brisa stores and what leaves your device</string>
 </resources>

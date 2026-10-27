@@ -20,8 +20,8 @@ android {
         applicationId = "app.brisa.browser"
         minSdk = 29
         targetSdk = 37
-        versionCode = 12
-        versionName = "0.9.3"
+        versionCode = 13
+        versionName = "0.10.0"
     }
 
     signingConfigs {

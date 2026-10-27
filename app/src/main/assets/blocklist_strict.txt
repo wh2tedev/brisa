@@ -1,0 +1,20 @@
+# Strict level: also blocks tag managers, fingerprinting and marketing scripts. May break some sites.
+googletagmanager.com
+facebook.net
+adobedtm.com
+tiqcdn.com
+fpjs.io
+fingerprint.com
+optimizely.com
+newrelic.com
+bugsnag.com
+datadoghq.com
+hs-analytics.net
+hs-scripts.com
+hs-banner.com
+hsadspixel.net
+marketo.net
+pardot.com
+cloudflareinsights.com
+sc-static.net
+segment.com

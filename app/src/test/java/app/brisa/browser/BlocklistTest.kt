@@ -9,6 +9,7 @@ class BlocklistTest {
     @Before
     fun load() {
         Blocklist.load(listOf("doubleclick.net", "Ads.Example.org"))
+        Blocklist.loadStrict(listOf("tagmanager.example"))
     }
 
     @Test
@@ -29,5 +30,12 @@ class BlocklistTest {
     @Test
     fun ignoresCase() {
         assertTrue(Blocklist.isBlocked("STATS.DoubleClick.NET"))
+    }
+
+    @Test
+    fun strictListOnlyAppliesInStrictMode() {
+        assertFalse(Blocklist.isBlocked("cdn.tagmanager.example"))
+        assertTrue(Blocklist.isBlocked("cdn.tagmanager.example", strictMode = true))
+        assertTrue(Blocklist.isBlocked("doubleclick.net", strictMode = true))
     }
 }

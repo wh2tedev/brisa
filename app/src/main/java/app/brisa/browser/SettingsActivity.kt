@@ -122,6 +122,11 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
 
     class PrivacyFragment : Page(R.xml.prefs_privacy, R.string.cat_privacy) {
         override fun setup() {
+            refreshExceptions()
+            pref<Preference>(Prefs.SITE_EXCEPTIONS)?.setOnPreferenceClickListener {
+                showExceptions()
+                true
+            }
             pref<SwitchPreferenceCompat>(Prefs.APP_LOCK)?.setOnPreferenceChangeListener { preference, value ->
                 changeAppLock(preference as SwitchPreferenceCompat, value as Boolean)
                 false
@@ -158,6 +163,30 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
                     } catch (e: ActivityNotFoundException) {
                         Toast.makeText(requireContext(), R.string.lock_unavailable, Toast.LENGTH_SHORT).show()
                     }
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
+
+        private fun refreshExceptions() {
+            pref<Preference>(Prefs.SITE_EXCEPTIONS)?.summary =
+                getString(R.string.site_exceptions_count, SiteExceptions.all().size)
+        }
+
+        private fun showExceptions() {
+            val context = requireContext()
+            val hosts = SiteExceptions.all()
+            if (hosts.isEmpty()) {
+                Toast.makeText(context, R.string.site_exceptions_none, Toast.LENGTH_LONG).show()
+                return
+            }
+            val keep = BooleanArray(hosts.size) { true }
+            MaterialAlertDialogBuilder(context)
+                .setTitle(R.string.pref_site_exceptions)
+                .setMultiChoiceItems(hosts.toTypedArray(), keep) { _, index, on -> keep[index] = on }
+                .setPositiveButton(R.string.exceptions_save) { _, _ ->
+                    SiteExceptions.replace(context, hosts.filterIndexed { index, _ -> keep[index] })
+                    refreshExceptions()
                 }
                 .setNegativeButton(android.R.string.cancel, null)
                 .show()
@@ -214,6 +243,17 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
             val context = requireContext()
             val version = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull()
             pref<Preference>("version")?.summary = "Brisa ${version.orEmpty()}"
+            pref<Preference>("privacy_policy")?.setOnPreferenceClickListener {
+                val text = runCatching {
+                    context.assets.open("privacy.txt").bufferedReader().use { it.readText() }
+                }.getOrDefault("")
+                MaterialAlertDialogBuilder(context)
+                    .setTitle(R.string.pref_privacy_policy)
+                    .setMessage(text)
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show()
+                true
+            }
             pref<Preference>("licenses")?.setOnPreferenceClickListener {
                 val text = runCatching {
                     context.assets.open("licenses.txt").bufferedReader().use { it.readText() }

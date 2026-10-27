@@ -2,6 +2,11 @@
 <PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
     <Preference app:key="version" app:selectable="false" app:title="@string/pref_version" app:iconSpaceReserved="false" />
     <Preference
+        app:key="privacy_policy"
+        app:title="@string/pref_privacy_policy"
+        app:summary="@string/pref_privacy_policy_sum"
+        app:iconSpaceReserved="false" />
+    <Preference
         app:key="licenses"
         app:title="@string/pref_licenses"
         app:summary="@string/pref_licenses_sum"

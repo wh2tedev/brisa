@@ -18,6 +18,14 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;37.0.0"
       - name: Test, lint and build
         run: gradle testDebugUnitTest lintDebug assembleDebug assembleRelease --no-daemon
+      - name: Check permissions
+        run: |
+          APK=app/build/outputs/apk/release/app-release-unsigned.apk
+          "$ANDROID_HOME/build-tools/37.0.0/aapt2" dump permissions "$APK" | tee permissions.txt
+          if grep -Eq "CAMERA|RECORD_AUDIO|LOCATION|CONTACTS|SMS|PHONE_STATE|CALL_|EXTERNAL_STORAGE|READ_MEDIA|CALENDAR|BLUETOOTH|BODY_SENSORS" permissions.txt; then
+            echo "A sensitive permission appeared. Update PRIVACY.md and the README before allowing it."
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: brisa-debug
@@ -27,5 +35,6 @@ jobs:
         with:
           name: reports
           path: |
+            permissions.txt
             app/build/reports/lint-results-debug.html
             app/build/reports/tests/testDebugUnitTest/

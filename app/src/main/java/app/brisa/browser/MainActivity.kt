@@ -92,6 +92,11 @@ class MainActivity : AppCompatActivity() {
         var errorUrl: String? = null
         var sslBlocked = false
 
+        /** Read from the network thread, so kept volatile. */
+        @Volatile
+        var pageHost: String? = null
+        val blocked = java.util.concurrent.atomic.AtomicInteger()
+
         fun clearError() {
             errorUrl = null
             sslBlocked = false
@@ -157,6 +162,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         Blocklist.load(this)
+        SiteExceptions.init(this)
         val external = externalUrl(intent)
         val saved = Session.load(this)?.takeIf { restoreEnabled() }
         saved?.let(::restore)
@@ -797,8 +803,11 @@ class MainActivity : AppCompatActivity() {
 
         tab.web.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
-                if (request.isForMainFrame || !prefs.getBoolean(Prefs.BLOCK_TRACKERS, true)) return null
-                if (!Blocklist.isBlocked(request.url.host)) return null
+                if (request.isForMainFrame) return null
+                val level = prefs.getString(Prefs.TRACKER_LEVEL, "standard")
+                if (level == "off" || SiteExceptions.isAllowed(tab.pageHost)) return null
+                if (!Blocklist.isBlocked(request.url.host, strictMode = level == "strict")) return null
+                tab.blocked.incrementAndGet()
                 return WebResourceResponse("text/plain", "utf-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))
             }
 
@@ -821,6 +830,8 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                tab.pageHost = url?.let { Uri.parse(it).host }
+                tab.blocked.set(0)
                 tab.title = ""
                 tab.favicon = null
                 setLoading(tab, true)
@@ -1135,6 +1146,7 @@ class MainActivity : AppCompatActivity() {
     private fun open(url: String, tab: Tab = current) {
         val uri = Uri.parse(url)
         tab.clearError()
+        tab.pageHost = Uri.parse(url).host
         tab.fallbackUrl = null
         tab.upgradedUrl = null
         var target = url
@@ -1313,9 +1325,24 @@ class MainActivity : AppCompatActivity() {
             m.root.postDelayed({ close { toggleDesktop() } }, 170)
         }
 
+        val siteHost = Uri.parse(urlOf(current).orEmpty()).host
+        val protection = prefs.getString(Prefs.TRACKER_LEVEL, "standard") != "off" && siteHost != null
+        val excepted = SiteExceptions.isAllowed(siteHost)
+        m.rowProtection.isVisible = protection
+        m.protectionSwitch.isChecked = !excepted
+        m.protectionSub.text =
+            if (excepted) getString(R.string.protection_off_site) else getString(R.string.blocked_on_page, current.blocked.get())
+        m.rowProtection.setOnClickListener {
+            m.protectionSwitch.toggle()
+            if (siteHost != null) {
+                if (m.protectionSwitch.isChecked) SiteExceptions.remove(this, siteHost) else SiteExceptions.add(this, siteHost)
+            }
+            m.root.postDelayed({ close { reload() } }, 170)
+        }
+
         val items = listOf<View>(
             m.iconRow, m.rowNewTab, m.rowFind, m.rowShare, m.rowBookmarks, m.rowDownloads, m.rowHistory,
-            m.rowDesktop, m.rowSettings,
+            m.rowDesktop, m.rowProtection, m.rowSettings,
         )
         m.card.doOnLayout { card ->
             card.pivotX = card.width.toFloat()
