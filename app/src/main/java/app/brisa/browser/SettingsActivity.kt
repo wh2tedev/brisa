@@ -177,6 +177,17 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
             val context = requireContext()
             val version = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull()
             pref<Preference>("version")?.summary = "Brisa ${version.orEmpty()}"
+            pref<Preference>("licenses")?.setOnPreferenceClickListener {
+                val text = runCatching {
+                    context.assets.open("licenses.txt").bufferedReader().use { it.readText() }
+                }.getOrDefault("")
+                MaterialAlertDialogBuilder(context)
+                    .setTitle(R.string.pref_licenses)
+                    .setMessage(text)
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show()
+                true
+            }
             pref<Preference>("reset_settings")?.setOnPreferenceClickListener {
                 MaterialAlertDialogBuilder(context)
                     .setTitle(R.string.reset_title)

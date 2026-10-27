@@ -155,4 +155,10 @@
     <string name="auth_username">Username</string>
     <string name="auth_password">Password</string>
     <string name="auth_sign_in">Sign in</string>
+    <string name="external_title">Open in another app?</string>
+    <string name="external_message">This link wants to open: %1$s</string>
+    <string name="external_open">Open</string>
+    <string name="external_missing">No app can open this link</string>
+    <string name="pref_licenses">Open-source licenses</string>
+    <string name="pref_licenses_sum">Libraries and icons used by Brisa</string>
 </resources>

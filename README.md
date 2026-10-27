@@ -15,6 +15,7 @@ Google is the default search engine. No analytics, no accounts, no third-party s
 - Pull to refresh
 - Pop-up windows opened by a tap (sign-in flows) open as a tab and return to the page that opened them
 - Username and password prompt for HTTP authentication, with a warning on unencrypted connections
+- Links such as `mailto:`, `tel:` and `intent:` open in another app after you confirm (only when you tap them)
 - Error pages that follow the theme, with a retry button and hints for local servers
 - Material 3 motion: spring press feedback, animated menu, tab sheet and omnibox, shared-axis transitions
 - Connection indicator in the address bar (lock for HTTPS, warning for HTTP)
@@ -83,6 +84,32 @@ The Origin Private File System is a separate feature and does not need any of th
 
 Private tabs are not possible with a plain `WebView`, which shares a single cookie store across the app.
 Bookmark folders and per-site permissions are not implemented.
+
+## Updating
+
+Android only installs an update when the new APK has the same package name and is signed with the same key.
+Release APKs are always signed with the maintainer's key, so they update each other. Debug builds use the fixed key
+in `app/debug.keystore` (public, not secret) and the package `app.brisa.browser.debug`, so they install next to the
+release app and update each other too. A release and a debug build never replace one another.
+
+## Tests and releases
+
+`gradle testDebugUnitTest` runs the unit tests (address-bar rules, tracker blocklist).
+`.github/workflows/build.yml` runs tests and lint and builds the debug and release APKs on every push.
+
+To publish, add these repository secrets: `KEYSTORE_BASE64` (`base64 -w0 brisa.jks`), `KEYSTORE_PASSWORD`,
+`KEY_ALIAS` and `KEY_PASSWORD`. Pushing a tag such as `v0.9.0` runs `release.yml`, which builds a signed APK
+and attaches it to a GitHub Release with its SHA-256 and the signing certificate fingerprint.
+
+## Credits and licenses
+
+Brisa is MIT licensed. It uses AndroidX, Material Components, the Kotlin standard library and Material Design icons
+(all Apache-2.0); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the in-app list under
+Settings > About > Open-source licenses. Web pages are rendered by the system's Android System WebView (Chromium),
+which Brisa does not bundle.
+
+Android, Google, Chrome, Google Search and Chromium are trademarks of Google LLC. Other search engines named in
+Settings belong to their owners. Brisa is an independent project and is not affiliated with or endorsed by any of them.
 
 ## License
 

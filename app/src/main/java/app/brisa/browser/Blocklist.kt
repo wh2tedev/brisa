@@ -7,11 +7,17 @@ object Blocklist {
     private var domains: Set<String> = emptySet()
 
     fun load(context: Context) {
-        domains = runCatching {
-            context.assets.open("blocklist.txt").bufferedReader().useLines { lines ->
-                lines.map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }.toHashSet()
-            }
-        }.getOrDefault(emptySet())
+        load(
+            runCatching {
+                context.assets.open("blocklist.txt").bufferedReader().useLines { lines ->
+                    lines.map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }.toList()
+                }
+            }.getOrDefault(emptyList()),
+        )
+    }
+
+    fun load(entries: Collection<String>) {
+        domains = entries.map { it.lowercase() }.toHashSet()
     }
 
     /** True if the host or any of its parent domains is listed. */

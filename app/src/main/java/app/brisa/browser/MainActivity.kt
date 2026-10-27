@@ -510,8 +510,21 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    /** The system downloader fails when the target file exists, so repeat downloads get a numbered name. */
+    private fun uniqueName(suggested: String): String {
+        val used = Downloads.all(this).map { it.name }.toSet()
+        if (suggested !in used) return suggested
+        val dot = suggested.lastIndexOf('.')
+        val base = if (dot > 0) suggested.substring(0, dot) else suggested
+        val ext = if (dot > 0) suggested.substring(dot) else ""
+        var n = 1
+        while ("$base ($n)$ext" in used) n++
+        return "$base ($n)$ext"
+    }
+
     /** Hands an http(s) download to the system downloader and records it in the Downloads list. */
-    private fun enqueue(url: String, userAgent: String, mime: String?, name: String) {
+    private fun enqueue(url: String, userAgent: String, mime: String?, suggested: String) {
+        val name = uniqueName(suggested)
         val id = UUID.randomUUID().toString()
         val tree = Storage.treeUri(this)
         val base = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
@@ -797,7 +810,10 @@ class MainActivity : AppCompatActivity() {
                             true
                         } else false
                     }
-                    else -> true
+                    else -> {
+                        if (request.hasGesture()) openExternal(uri.toString(), tab)
+                        true
+                    }
                 }
             }
 
@@ -977,6 +993,54 @@ class MainActivity : AppCompatActivity() {
 
     // region navigation
 
+    private class ExternalLink(val intent: Intent, val fallback: String?, val label: String)
+
+    /** Hands mailto:, tel:, intent: and similar links to another app, after the user confirms. */
+    private fun openExternal(url: String, tab: Tab) {
+        val link = parseExternal(url) ?: return
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.external_title)
+            .setMessage(getString(R.string.external_message, link.label.take(120)))
+            .setPositiveButton(R.string.external_open) { _, _ ->
+                try {
+                    startActivity(link.intent)
+                } catch (e: Exception) {
+                    val fallback = link.fallback
+                    if (fallback != null) open(fallback, tab) else notify(R.string.external_missing)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun parseExternal(url: String): ExternalLink? {
+        val uri = Uri.parse(url)
+        return when (uri.scheme?.lowercase()) {
+            "mailto", "sms", "smsto" ->
+                ExternalLink(Intent(Intent.ACTION_SENDTO, uri), null, uri.schemeSpecificPart.substringBefore('?'))
+            "tel" -> ExternalLink(Intent(Intent.ACTION_DIAL, uri), null, uri.schemeSpecificPart)
+            "geo", "market" -> ExternalLink(Intent(Intent.ACTION_VIEW, uri), null, url)
+            "intent" -> parseIntentLink(url)
+            else -> null
+        }
+    }
+
+    /** intent: links can carry anything, so only a plain, browsable VIEW intent is let through. */
+    private fun parseIntentLink(url: String): ExternalLink? {
+        val intent = runCatching { Intent.parseUri(url, Intent.URI_INTENT_SCHEME) }.getOrNull() ?: return null
+        val fallback = intent.getStringExtra("browser_fallback_url")?.takeIf { it.startsWith("https://") }
+        val scheme = intent.data?.scheme?.lowercase()
+        if (intent.action != Intent.ACTION_VIEW || scheme == null || scheme in setOf("file", "content", "javascript", "data")) {
+            return null
+        }
+        intent.addCategory(Intent.CATEGORY_BROWSABLE)
+        intent.component = null
+        intent.selector = null
+        intent.flags = 0
+        intent.replaceExtras(null as Bundle?)
+        return ExternalLink(intent, fallback, intent.`package` ?: intent.dataString.orEmpty())
+    }
+
     private fun reload() {
         val failed = current.errorUrl
         if (failed != null) open(failed) else web.reload()
@@ -1078,24 +1142,9 @@ class MainActivity : AppCompatActivity() {
         tab.web.loadUrl(target, headers())
     }
 
-    private fun isPrivateHost(host: String?): Boolean {
-        val h = host?.lowercase() ?: return false
-        return '.' !in h || h.endsWith(".local") || h.endsWith(".localhost") || PRIVATE_IP.containsMatchIn(h)
-    }
+    private fun isPrivateHost(host: String?) = Urls.isPrivateHost(host)
 
-    private fun resolve(input: String): String {
-        val text = input.trim()
-        if (text.startsWith("https://", true) || text.startsWith("http://", true)) return text
-        if ("://" in text || ' ' in text) return searchUrl(text)
-        val host = runCatching { Uri.parse("http://$text").host }.getOrNull()?.lowercase()
-        return when {
-            host.isNullOrEmpty() -> searchUrl(text)
-            host == "localhost" || host.startsWith("[") -> "http://$text"
-            '.' !in host -> searchUrl(text)
-            isPrivateHost(host) -> "http://$text"
-            else -> "https://$text"
-        }
-    }
+    private fun resolve(input: String) = Urls.resolve(input, ::searchUrl)
 
     private fun searchUrl(query: String) = SearchEngines.current(prefs).url(query)
 
@@ -1413,6 +1462,5 @@ class MainActivity : AppCompatActivity() {
             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         const val MAX_TABS = 30
         const val MAX_BLOB = 26214400
-        val PRIVATE_IP = Regex("^(127\\.|10\\.|192\\.168\\.|169\\.254\\.|172\\.(1[6-9]|2\\d|3[01])\\.)")
     }
 }
