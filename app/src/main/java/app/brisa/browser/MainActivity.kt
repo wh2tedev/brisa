@@ -179,6 +179,8 @@ class MainActivity : AppCompatActivity() {
         tabs.forEach(::applySettings)
         applyToolbarPosition()
         ui.swipe.isEnabled = prefs.getBoolean(Prefs.PULL_REFRESH, true)
+        applyPreviewSetting()
+        checkEngineAge()
         val pending = prefs.getStringSet(Prefs.PENDING_CLEAR, null)
         if (!pending.isNullOrEmpty()) {
             prefs.edit { remove(Prefs.PENDING_CLEAR) }
@@ -494,14 +496,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun confirmDownload(name: String, size: Long, onConfirm: () -> Unit) {
-        if (!prefs.getBoolean(Prefs.CONFIRM_DOWNLOADS, true)) {
+        val risky = name.substringAfterLast('.', "").lowercase() in RISKY_EXTENSIONS
+        if (!risky && !prefs.getBoolean(Prefs.CONFIRM_DOWNLOADS, true)) {
             onConfirm()
             return
         }
         val detail = if (size > 0) Formatter.formatShortFileSize(this, size) else getString(R.string.unknown_size)
         MaterialAlertDialogBuilder(this)
             .setTitle(R.string.download_title)
-            .setMessage("$name\n$detail\n\n${getString(R.string.save_to)}: ${Storage.label(this)}")
+            .setMessage("$name\n$detail\n\n${getString(R.string.save_to)}: ${Storage.label(this)}" + if (risky) "\n\n" + getString(R.string.download_risky) else "")
             .setPositiveButton(R.string.download) { _, _ -> onConfirm() }
             .setNeutralButton(R.string.change_folder) { _, _ ->
                 folderPicker.show { confirmDownload(name, size, onConfirm) }
@@ -938,6 +941,7 @@ class MainActivity : AppCompatActivity() {
             ) = callback.invoke(origin, false, false)
         }
 
+        tab.web.setOnLongClickListener { showContextMenu(tab) }
         tab.web.setFindListener { active, matches, done ->
             if (done && tab === current) {
                 ui.findCount.text = if (matches == 0) "0/0" else "${active + 1}/$matches"
@@ -1393,6 +1397,85 @@ class MainActivity : AppCompatActivity() {
         WindowCompat.getInsetsController(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
     }
 
+    /** Long press on a link or image: shows the full address first, which also helps spot fake links. */
+    private fun showContextMenu(tab: Tab): Boolean {
+        val hit = tab.web.hitTestResult
+        val extra = hit.extra?.takeIf { it.startsWith("https://") || it.startsWith("http://") } ?: return false
+        return when (hit.type) {
+            WebView.HitTestResult.SRC_ANCHOR_TYPE -> {
+                linkMenu(tab, extra, null)
+                true
+            }
+            WebView.HitTestResult.IMAGE_TYPE -> {
+                linkMenu(tab, null, extra)
+                true
+            }
+            WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE -> {
+                val handler = android.os.Handler(android.os.Looper.getMainLooper()) { message ->
+                    linkMenu(tab, message.data.getString("url")?.takeIf { it.startsWith("http") }, extra)
+                    true
+                }
+                tab.web.requestFocusNodeHref(handler.obtainMessage())
+                true
+            }
+            else -> false
+        }
+    }
+
+    private fun linkMenu(tab: Tab, link: String?, image: String?) {
+        val actions = mutableListOf<Pair<Int, () -> Unit>>()
+        if (link != null) {
+            actions += R.string.open_new_tab to { newTab(link) }
+            actions += R.string.copy_link to { copyText(link) }
+            actions += R.string.share_link to { shareText(link) }
+        }
+        if (image != null) {
+            actions += R.string.open_image to { newTab(image) }
+            actions += R.string.save_image to {
+                startDownload(tab.web, image, tab.web.settings.userAgentString, null, null, -1)
+            }
+            actions += R.string.copy_image_link to { copyText(image) }
+        }
+        if (actions.isEmpty()) return
+        MaterialAlertDialogBuilder(this)
+            .setTitle((link ?: image).orEmpty().take(100))
+            .setItems(actions.map { getString(it.first) }.toTypedArray()) { _, index -> actions[index].second() }
+            .show()
+    }
+
+    private fun copyText(text: String) {
+        getSystemService(android.content.ClipboardManager::class.java)
+            .setPrimaryClip(android.content.ClipData.newPlainText("link", text))
+        notify(R.string.link_copied)
+    }
+
+    private fun shareText(text: String) {
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
+        startActivity(Intent.createChooser(send, null))
+    }
+
+    private fun applyPreviewSetting() = AppLock.applyPrivacyFlags(this)
+
+    /** Page security depends on the system WebView, so warn (at most weekly) when it has not been updated for a while. */
+    private fun checkEngineAge() {
+        val engine = WebView.getCurrentWebViewPackage() ?: return
+        val now = System.currentTimeMillis()
+        val days = (now - engine.lastUpdateTime) / android.text.format.DateUtils.DAY_IN_MILLIS
+        if (days < ENGINE_MAX_AGE_DAYS) return
+        if (now - prefs.getLong(Prefs.WEBVIEW_WARNED, 0) < android.text.format.DateUtils.WEEK_IN_MILLIS) return
+        prefs.edit { putLong(Prefs.WEBVIEW_WARNED, now) }
+        Snackbar.make(ui.root, getString(R.string.webview_old, days), Snackbar.LENGTH_LONG)
+            .setAction(R.string.update) {
+                val store = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${engine.packageName}"))
+                try {
+                    startActivity(store)
+                } catch (e: Exception) {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=${engine.packageName}")))
+                }
+            }
+            .show()
+    }
+
     private fun share() {
         val url = web.url ?: return
         val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, url)
@@ -1458,6 +1541,10 @@ class MainActivity : AppCompatActivity() {
     // endregion
 
     private companion object {
+        const val ENGINE_MAX_AGE_DAYS = 60
+        val RISKY_EXTENSIONS = setOf(
+            "apk", "apks", "xapk", "exe", "msi", "bat", "cmd", "scr", "jar", "js", "vbs", "ps1", "sh", "lnk", "dmg",
+        )
         const val DESKTOP_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         const val MAX_TABS = 30

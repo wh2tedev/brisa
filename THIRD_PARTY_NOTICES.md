@@ -7,7 +7,7 @@ Nothing here changes the license of Brisa itself.
 
 | Component | License | Used for |
 | --- | --- | --- |
-| [AndroidX](https://developer.android.com/jetpack/androidx) (Core KTX, AppCompat, Preference, SwipeRefreshLayout, DynamicAnimation, RecyclerView, DocumentFile, WorkManager) and its transitive libraries | Apache-2.0 | Activities, settings screens, lists, spring animations, file access, background work |
+| [AndroidX](https://developer.android.com/jetpack/androidx) (Core KTX, AppCompat, Preference, SwipeRefreshLayout, DynamicAnimation, RecyclerView, DocumentFile, WorkManager, Biometric) and its transitive libraries | Apache-2.0 | Activities, settings screens, lists, spring animations, file access, background work |
 | [Material Components for Android](https://github.com/material-components/material-components-android) | Apache-2.0 | Material 3 widgets, dialogs and bottom sheets |
 | [Kotlin standard library](https://github.com/JetBrains/kotlin) | Apache-2.0 | Language runtime |
 | [Material Design icons](https://github.com/google/material-design-icons) (some adapted) | Apache-2.0 | Interface icons |

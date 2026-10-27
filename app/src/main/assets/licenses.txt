@@ -4,7 +4,7 @@ Brisa is released under the MIT License. It is built on the open-source work lis
 
 INCLUDED IN THE APP
 
-AndroidX (Core KTX, AppCompat, Preference, SwipeRefreshLayout, DynamicAnimation, RecyclerView, DocumentFile, WorkManager) and its transitive libraries
+AndroidX (Core KTX, AppCompat, Preference, SwipeRefreshLayout, DynamicAnimation, RecyclerView, DocumentFile, WorkManager, Biometric) and its transitive libraries
   License: Apache-2.0
   https://developer.android.com/jetpack/androidx
 

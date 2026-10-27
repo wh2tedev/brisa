@@ -14,6 +14,8 @@ import androidx.fragment.app.Fragment
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.PreferenceManager
+import androidx.preference.SwitchPreferenceCompat
+import android.provider.Settings
 import androidx.preference.SeekBarPreference
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
@@ -120,10 +122,45 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
 
     class PrivacyFragment : Page(R.xml.prefs_privacy, R.string.cat_privacy) {
         override fun setup() {
+            pref<SwitchPreferenceCompat>(Prefs.APP_LOCK)?.setOnPreferenceChangeListener { preference, value ->
+                changeAppLock(preference as SwitchPreferenceCompat, value as Boolean)
+                false
+            }
             pref<Preference>(Prefs.CLEAR_NOW)?.setOnPreferenceClickListener {
                 showClearDialog()
                 true
             }
+        }
+
+        /** Turning the lock on or off needs the phone's own authentication, so nobody else can change it. */
+        private fun changeAppLock(preference: SwitchPreferenceCompat, enable: Boolean) {
+            val activity = requireActivity()
+            val availability = AppLock.availability(activity)
+            when {
+                enable && availability == AppLock.Availability.NEEDS_SCREEN_LOCK -> showLockSetup()
+                availability == AppLock.Availability.UNAVAILABLE ->
+                    Toast.makeText(activity, R.string.lock_unavailable, Toast.LENGTH_SHORT).show()
+                !enable && availability == AppLock.Availability.NEEDS_SCREEN_LOCK -> preference.isChecked = false
+                else -> AppLock.authenticate(activity, getString(R.string.lock_confirm_title), onSuccess = {
+                    preference.isChecked = enable
+                    AppLock.unlock()
+                })
+            }
+        }
+
+        private fun showLockSetup() {
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.lock_setup_title)
+                .setMessage(R.string.lock_setup_message)
+                .setPositiveButton(R.string.lock_open_settings) { _, _ ->
+                    try {
+                        startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
+                    } catch (e: ActivityNotFoundException) {
+                        Toast.makeText(requireContext(), R.string.lock_unavailable, Toast.LENGTH_SHORT).show()
+                    }
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
         }
 
         private fun showClearDialog() {

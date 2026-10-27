@@ -13,6 +13,11 @@ Google is the default search engine. No analytics, no accounts, no third-party s
 - Bookmarks and history, stored on the device only
 - Address bar suggestions computed locally from bookmarks and history
 - Pull to refresh
+- Long-press a link or image to open it in a new tab, copy, share or download it; the full address is shown first
+- Warns when the system WebView has not been updated for 60 days, since Brisa relies on it for page security
+- Downloads of file types that can run code (APK, EXE, scripts) always ask, even if confirmations are off
+- Optional: hide Brisa in the app switcher and block screenshots
+- Optional app lock with the phone's own fingerprint, face or screen lock (PIN, pattern, password); Brisa never sees or stores them
 - Pop-up windows opened by a tap (sign-in flows) open as a tab and return to the page that opened them
 - Username and password prompt for HTTP authentication, with a warning on unencrypted connections
 - Links such as `mailto:`, `tel:` and `intent:` open in another app after you confirm (only when you tap them)
