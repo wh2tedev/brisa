@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
@@ -138,7 +137,7 @@ fun ListPreference(
         onClick = { open = true },
     )
     if (open) {
-        AlertDialog(
+        BrisaDialog(
             onDismissRequest = { open = false },
             title = { Text(stringResource(title)) },
             text = {
@@ -156,7 +155,7 @@ fun ListPreference(
                                         open = false
                                     },
                                 )
-                                .padding(vertical = 12.dp),
+                                .padding(vertical = 8.dp),
                         ) {
                             RadioButton(selected = i == index, onClick = null)
                             Text(label, Modifier.padding(start = 16.dp))
@@ -185,7 +184,7 @@ fun TextPreference(prefs: SharedPreferences, key: String, @StringRes title: Int)
         },
     )
     if (open) {
-        AlertDialog(
+        BrisaDialog(
             onDismissRequest = { open = false },
             title = { Text(stringResource(title)) },
             text = {

@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -376,7 +375,7 @@ class SettingsActivity : FragmentActivity() {
         )
 
         text?.let { (title, body) ->
-            AlertDialog(
+            BrisaDialog(
                 onDismissRequest = { text = null },
                 title = { Text(stringResource(title)) },
                 text = {
@@ -388,7 +387,7 @@ class SettingsActivity : FragmentActivity() {
             )
         }
         if (confirmReset) {
-            AlertDialog(
+            BrisaDialog(
                 onDismissRequest = { confirmReset = false },
                 title = { Text(stringResource(R.string.reset_title)) },
                 text = { Text(stringResource(R.string.pref_reset_sum)) },
@@ -431,7 +430,7 @@ class SettingsActivity : FragmentActivity() {
 
     @Composable
     private fun LockSetupDialog(onDismiss: () -> Unit) {
-        AlertDialog(
+        BrisaDialog(
             onDismissRequest = onDismiss,
             title = { Text(stringResource(R.string.lock_setup_title)) },
             text = { Text(stringResource(R.string.lock_setup_message)) },
@@ -452,7 +451,7 @@ class SettingsActivity : FragmentActivity() {
     @Composable
     private fun ExceptionsDialog(hosts: List<String>, onDismiss: () -> Unit, onSave: (List<String>) -> Unit) {
         val keep = remember { mutableStateOf(hosts.toSet()) }
-        AlertDialog(
+        BrisaDialog(
             onDismissRequest = onDismiss,
             title = { Text(stringResource(R.string.pref_site_exceptions)) },
             text = {
@@ -467,7 +466,7 @@ class SettingsActivity : FragmentActivity() {
                                     role = Role.Checkbox,
                                     onValueChange = { keep.value = if (it) keep.value + host else keep.value - host },
                                 )
-                                .padding(vertical = 8.dp),
+                                .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Checkbox(checked = on, onCheckedChange = null)
@@ -492,7 +491,7 @@ class SettingsActivity : FragmentActivity() {
             R.string.clear_cache_item, R.string.clear_downloads_item,
         )
         var checked by remember { mutableStateOf(listOf(true, true, true, false)) }
-        AlertDialog(
+        BrisaDialog(
             onDismissRequest = onDismiss,
             title = { Text(stringResource(R.string.clear_what)) },
             text = {
@@ -506,7 +505,7 @@ class SettingsActivity : FragmentActivity() {
                                     role = Role.Checkbox,
                                     onValueChange = { on -> checked = checked.mapIndexed { j, v -> if (j == i) on else v } },
                                 )
-                                .padding(vertical = 8.dp),
+                                .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Checkbox(checked = checked[i], onCheckedChange = null)

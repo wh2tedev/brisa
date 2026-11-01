@@ -111,7 +111,10 @@ class DownloadsActivity : FragmentActivity() {
         try {
             val app = applicationContext
             withContext(Dispatchers.IO) { runCatching { Downloads.sync(app) } }
-            if (!isDestroyed) items = Downloads.all(this)
+            if (!isDestroyed) {
+                val latest = Downloads.all(this)
+                if (latest != items) items = latest
+            }
         } finally {
             syncing.set(false)
         }

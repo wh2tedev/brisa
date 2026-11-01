@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -54,7 +55,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -91,6 +91,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -506,7 +507,7 @@ private fun WebArea(state: BrowserState, host: BrowserHost, modifier: Modifier) 
     val reveal = remember { Animatable(1f) }
     LaunchedEffect(state.selectNonce) {
         reveal.snapTo(0f)
-        reveal.animateTo(1f, tween(Motion.MEDIUM, easing = Motion.decelerate))
+        reveal.animateTo(1f, tween(Motion.SHORT, easing = Motion.decelerate))
     }
     val accent = scheme.primary.toArgb()
     val spinnerBg = scheme.surfaceContainerHigh.toArgb()
@@ -529,11 +530,7 @@ private fun WebArea(state: BrowserState, host: BrowserHost, modifier: Modifier) 
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    val a = reveal.value
-                    alpha = a
-                    translationY = (1f - a) * 10.dp.toPx()
-                    scaleX = 0.97f + 0.03f * a
-                    scaleY = 0.97f + 0.03f * a
+                    alpha = 0.4f + 0.6f * reveal.value
                 },
             update = { layout ->
                 layout.isEnabled = state.pullEnabled
@@ -646,11 +643,12 @@ private fun ListSheet(
             style = MaterialTheme.typography.titleSmall,
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
         )
-        LazyColumn(Modifier.weight(1f, fill = false)) { content(this, dismiss) }
+        val maxList = (LocalConfiguration.current.screenHeightDp * 0.45f).dp
+        LazyColumn(Modifier.heightIn(max = maxList)) { content(this, dismiss) }
         if (buttonLabel != null) {
             FilledTonalButton(
                 onClick = { onButton(dismiss) },
-                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp),
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
             ) { Text(buttonLabel) }
         }
     }
@@ -827,7 +825,7 @@ private fun PromptDialog(prompt: Prompt, state: BrowserState) {
         state.prompt = null
     }
     when (prompt) {
-        is Prompt.Download -> AlertDialog(
+        is Prompt.Download -> BrisaDialog(
             onDismissRequest = ::close,
             title = { Text(stringResource(R.string.download_title)) },
             text = { Text(prompt.message) },
@@ -847,7 +845,7 @@ private fun PromptDialog(prompt: Prompt, state: BrowserState) {
                 }
             },
         )
-        is Prompt.External -> AlertDialog(
+        is Prompt.External -> BrisaDialog(
             onDismissRequest = ::close,
             title = { Text(stringResource(R.string.external_title)) },
             text = { Text(prompt.message) },
@@ -860,7 +858,7 @@ private fun PromptDialog(prompt: Prompt, state: BrowserState) {
             dismissButton = { TextButton(onClick = ::close) { Text(stringResource(android.R.string.cancel)) } },
         )
         is Prompt.Auth -> AuthDialog(prompt)
-        is Prompt.LinkMenu -> AlertDialog(
+        is Prompt.LinkMenu -> BrisaDialog(
             onDismissRequest = ::close,
             title = { Text(prompt.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
             text = {
@@ -875,7 +873,7 @@ private fun PromptDialog(prompt: Prompt, state: BrowserState) {
                                     close()
                                     action()
                                 }
-                                .padding(vertical = 14.dp),
+                                .padding(vertical = 10.dp),
                         )
                     }
                 }
@@ -894,7 +892,7 @@ private fun AuthDialog(prompt: Prompt.Auth) {
     var visible by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
-    AlertDialog(
+    BrisaDialog(
         onDismissRequest = prompt.onCancel,
         title = { Text(stringResource(R.string.auth_title)) },
         text = {

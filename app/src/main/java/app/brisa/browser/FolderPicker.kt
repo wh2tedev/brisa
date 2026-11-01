@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -49,7 +48,7 @@ class FolderPicker(private val activity: ComponentActivity) {
     fun Dialog() {
         if (!visible) return
         val labels = listOf(stringResource(R.string.default_folder), stringResource(R.string.choose_folder))
-        AlertDialog(
+        BrisaDialog(
             onDismissRequest = {
                 visible = false
                 finish()
@@ -75,7 +74,7 @@ class FolderPicker(private val activity: ComponentActivity) {
                                         }
                                     },
                                 )
-                                .padding(vertical = 12.dp),
+                                .padding(vertical = 8.dp),
                         ) {
                             RadioButton(selected = selected, onClick = null)
                             Text(label, Modifier.padding(start = 16.dp))
