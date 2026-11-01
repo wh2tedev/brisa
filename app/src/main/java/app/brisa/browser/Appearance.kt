@@ -95,12 +95,12 @@ object Appearance {
     private val lightAccents = mapOf(
         "blue" to Color(0xFF1A73E8), "green" to Color(0xFF188038), "purple" to Color(0xFF8430CE),
         "orange" to Color(0xFFC25E00), "pink" to Color(0xFFD01884), "teal" to Color(0xFF00796B),
-        "red" to Color(0xFFD93025),
+        "red" to Color(0xFFD93025), "white" to Color(0xFF1B1C1F),
     )
     private val darkAccents = mapOf(
         "blue" to Color(0xFF8AB4F8), "green" to Color(0xFF81C995), "purple" to Color(0xFFC58AF9),
         "orange" to Color(0xFFFCAD70), "pink" to Color(0xFFFF8BCB), "teal" to Color(0xFF78D9EC),
-        "red" to Color(0xFFF28B82),
+        "red" to Color(0xFFF28B82), "white" to Color(0xFFFFFFFF),
     )
 
     private fun fixedScheme(accentId: String, isDark: Boolean, isAmoled: Boolean): ColorScheme {
