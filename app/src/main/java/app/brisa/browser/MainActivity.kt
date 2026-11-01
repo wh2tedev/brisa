@@ -1,49 +1,30 @@
 package app.brisa.browser
 
-import android.animation.LayoutTransition
-import android.animation.ValueAnimator
-import android.os.Build
-import android.content.res.Configuration
-import androidx.core.graphics.ColorUtils
-import java.io.File
-import android.text.format.Formatter
-import android.util.Base64
-import android.webkit.WebResourceResponse
-import androidx.core.view.ViewCompat
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import org.json.JSONObject
-import java.io.ByteArrayInputStream
-import java.util.UUID
 import android.app.ActivityOptions
 import android.app.DownloadManager
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.SharedPreferences
-import android.content.res.ColorStateList
 import android.graphics.Bitmap
-import android.graphics.Color
-import android.graphics.drawable.ColorDrawable
-import android.graphics.drawable.GradientDrawable
 import android.net.Uri
-import android.os.Message
-import android.text.TextUtils
-import android.view.WindowManager
-import android.webkit.HttpAuthHandler
-import android.app.Dialog
-import app.brisa.browser.databinding.DialogHttpAuthBinding
 import android.net.http.SslError
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
+import android.os.Message
+import android.text.TextUtils
 import android.text.format.DateUtils
-import android.view.Gravity
-import android.view.HapticFeedbackConstants
+import android.text.format.Formatter
+import android.util.Base64
 import android.view.View
 import android.view.ViewGroup
-import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputMethodManager
-import android.view.animation.OvershootInterpolator
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
+import android.webkit.HttpAuthHandler
 import android.webkit.PermissionRequest
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.SslErrorHandler
@@ -52,35 +33,39 @@ import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
-import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.PopupWindow
-import android.widget.TextView
 import androidx.activity.addCallback
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
+import androidx.annotation.StringRes
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarResult
 import androidx.core.content.edit
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.core.view.doOnLayout
-import androidx.core.view.isGone
-import androidx.core.view.isVisible
-import androidx.core.widget.doOnTextChanged
-import androidx.preference.PreferenceManager
-import app.brisa.browser.databinding.ActivityMainBinding
-import app.brisa.browser.databinding.MenuPopupBinding
-import com.google.android.material.bottomsheet.BottomSheetDialog
-import com.google.android.material.snackbar.Snackbar
+import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import org.json.JSONObject
+import java.io.ByteArrayInputStream
+import java.io.File
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
-class MainActivity : AppCompatActivity() {
+private val tabIds = AtomicLong()
+
+class MainActivity : FragmentActivity(), BrowserHost {
 
     private class Tab(val web: WebView) {
+        val id = tabIds.incrementAndGet()
         var title = ""
         var loading = false
         var progress = 0
@@ -95,7 +80,7 @@ class MainActivity : AppCompatActivity() {
         /** Read from the network thread, so kept volatile. */
         @Volatile
         var pageHost: String? = null
-        val blocked = java.util.concurrent.atomic.AtomicInteger()
+        val blocked = AtomicInteger()
 
         fun clearError() {
             errorUrl = null
@@ -103,16 +88,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private lateinit var ui: ActivityMainBinding
+    private val ui = BrowserState()
     private lateinit var prefs: SharedPreferences
     private val defaultUa by lazy { WebSettings.getDefaultUserAgent(this) }
-    private val omniBg by lazy { ui.omnibox.background.mutate() as GradientDrawable }
     private val tabs = mutableListOf<Tab>()
-    private var authDialog: Dialog? = null
     private lateinit var current: Tab
     private val web get() = current.web
-    private var clearShown = false
-    private var suggestShown = false
     private var blobToken: String? = null
     private var blobName = ""
     private val blobBridge = BlobBridge(
@@ -128,11 +109,8 @@ class MainActivity : AppCompatActivity() {
     )
 
     private val folderPicker = FolderPicker(this)
-    private var appearanceSig = ""
-    private var toolbarBottom = false
 
     private var fileCallback: ValueCallback<Array<Uri>>? = null
-    private var customView: View? = null
     private var customCallback: WebChromeClient.CustomViewCallback? = null
 
     private val filePicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -140,25 +118,26 @@ class MainActivity : AppCompatActivity() {
         fileCallback = null
     }
 
+    override val webContainer: ViewGroup by lazy {
+        FrameLayout(this).apply {
+            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
-        Appearance.beforeCreate(this)
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        Appearance.apply(this)
-        appearanceSig = Appearance.signature(this)
-        ui = ActivityMainBinding.inflate(layoutInflater)
-        setContentView(ui.root)
-        Appearance.finish(this)
-        prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        prefs = defaultPrefs()
+        ui.toolbarBottom = prefs.getString(Prefs.TOOLBAR, "top") == "bottom"
+        ui.pullEnabled = prefs.getBoolean(Prefs.PULL_REFRESH, true)
 
-        setupBars()
-        applyToolbarPosition()
+        // Added before the content so Compose's own back handlers (find bar, address bar, fullscreen) take priority.
         onBackPressedDispatcher.addCallback(this) { goBack() }
-
-        ViewCompat.setOnApplyWindowInsetsListener(ui.content) { view, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
-            view.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom))
-            WindowInsetsCompat.CONSUMED
+        setContent {
+            BrisaTheme {
+                BrowserScreen(ui, this@MainActivity)
+                folderPicker.Dialog()
+            }
         }
 
         Blocklist.load(this)
@@ -176,15 +155,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        Appearance.beforeCreate(this)
-        if (Appearance.signature(this) != appearanceSig) {
-            recreate()
-            return
-        }
         web.onResume()
         tabs.forEach(::applySettings)
         applyToolbarPosition()
-        ui.swipe.isEnabled = prefs.getBoolean(Prefs.PULL_REFRESH, true)
+        ui.pullEnabled = prefs.getBoolean(Prefs.PULL_REFRESH, true)
         applyPreviewSetting()
         checkEngineAge()
         val pending = prefs.getStringSet(Prefs.PENDING_CLEAR, null)
@@ -192,11 +166,6 @@ class MainActivity : AppCompatActivity() {
             prefs.edit { remove(Prefs.PENDING_CLEAR) }
             clearData(pending.toSet())
         }
-    }
-
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        if (Appearance.signature(this) != appearanceSig) recreate()
     }
 
     override fun onPause() {
@@ -261,22 +230,13 @@ class MainActivity : AppCompatActivity() {
         exitFullscreen()
         closeFind()
         current = tab
-        ui.webContainer.removeAllViews()
-        ui.webContainer.addView(tab.web)
-        ui.webContainer.apply {
-            alpha = 0f
-            translationY = dp(10).toFloat()
-            scaleX = 0.97f
-            scaleY = 0.97f
-            animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setDuration(Motion.MEDIUM)
-                .setInterpolator(Motion.decelerate).start()
-        }
-        hideSuggestions()
-        ui.urlBar.clearFocus()
+        webContainer.removeAllViews()
+        webContainer.addView(tab.web)
+        ui.selectNonce++
         showUrl(urlOf(tab))
-        ui.progress.setProgressCompat(tab.progress, false)
+        ui.progress = tab.progress
         renderLoading()
-        updateTabCount()
+        syncTabs()
         tab.pendingUrl?.let {
             tab.pendingUrl = null
             open(it, tab)
@@ -290,7 +250,7 @@ class MainActivity : AppCompatActivity() {
         if (tabs.isEmpty()) newTab(home())
         else if (tab === current) select(tab.opener?.takeIf { it in tabs } ?: tabs[minOf(index, tabs.lastIndex)])
         destroy(tab)
-        updateTabCount()
+        syncTabs()
     }
 
     private fun destroy(tab: Tab) {
@@ -300,176 +260,33 @@ class MainActivity : AppCompatActivity() {
 
     private fun goBack() {
         when {
-            customView != null -> exitFullscreen()
-            ui.urlBar.hasFocus() -> {
-                ui.urlBar.clearFocus()
-                hideKeyboard(ui.urlBar)
-            }
-            ui.findBar.isVisible -> closeFind()
             web.canGoBack() -> web.goBack()
             tabs.size > 1 -> closeTab(current)
             else -> finish()
         }
     }
 
-    private fun updateTabCount() {
-        val label = tabs.size.toString()
-        if (ui.tabCount.text == label) return
-        ui.tabCount.text = label
-        ui.tabCount.animate().cancel()
-        ui.tabCount.scaleX = 1.4f
-        ui.tabCount.scaleY = 1.4f
-        ui.tabCount.animate().scaleX(1f).scaleY(1f).setDuration(320).setInterpolator(OvershootInterpolator(3f)).start()
+    /** Publishes the tab list to the UI. Cheap: there are at most [MAX_TABS] tabs. */
+    private fun syncTabs() {
+        if (!::current.isInitialized) return
+        ui.tabEntries = tabs.map {
+            TabEntry(it.id, titleOf(it), displayUrl(urlOf(it)), it.favicon, it === current)
+        }
     }
 
     private fun urlOf(tab: Tab): String? = tab.web.url ?: tab.pendingUrl
 
     private fun titleOf(tab: Tab): String =
-        tab.title.ifBlank { display(urlOf(tab)) }.ifBlank { getString(R.string.new_tab) }
+        tab.title.ifBlank { displayUrl(urlOf(tab)) }.ifBlank { getString(R.string.new_tab) }
 
-    // endregion
+    override fun newTab() = newTab(home())
 
-    // region sheets
-
-    private fun sheetContent(title: Int): Triple<BottomSheetDialog, View, LinearLayout> {
-        val sheet = BottomSheetDialog(this)
-        val content = layoutInflater.inflate(R.layout.sheet_tabs, null)
-        content.findViewById<TextView>(R.id.sheetTitle).setText(title)
-        return Triple(sheet, content, content.findViewById(R.id.tabList))
+    override fun selectTab(id: Long) {
+        tabs.firstOrNull { it.id == id }?.let(::select)
     }
 
-    private val avatarColors = intArrayOf(
-        0xFF4285F4.toInt(), 0xFF34A853.toInt(), 0xFFA142F4.toInt(),
-        0xFFF29900.toInt(), 0xFFE8438A.toInt(), 0xFF12B5CB.toInt(),
-    )
-
-    private fun row(
-        list: LinearLayout,
-        title: String,
-        subtitle: String,
-        index: Int,
-        animate: Boolean,
-        onOpen: () -> Unit,
-        onClose: (View) -> Unit,
-        favicon: Bitmap? = null,
-        selected: Boolean = false,
-    ): View {
-        val row = layoutInflater.inflate(R.layout.item_tab, list, false)
-        row.findViewById<TextView>(R.id.tabTitle).text = title
-        row.findViewById<TextView>(R.id.tabSubtitle).apply {
-            text = subtitle
-            isGone = subtitle.isEmpty() || subtitle == title
-        }
-        val seed = subtitle.ifEmpty { title }
-        val color = avatarColors[(seed.hashCode() and 0x7fffffff) % avatarColors.size]
-        row.findViewById<View>(R.id.avatarBg).backgroundTintList =
-            ColorStateList.valueOf(ColorUtils.setAlphaComponent(color, 0x33))
-        row.findViewById<TextView>(R.id.avatarLetter).apply {
-            text = seed.firstOrNull { it.isLetterOrDigit() }?.uppercaseChar()?.toString().orEmpty()
-            setTextColor(color)
-            isGone = favicon != null
-        }
-        row.findViewById<ImageView>(R.id.avatarIcon).apply {
-            if (favicon != null) setImageBitmap(favicon)
-            isVisible = favicon != null
-        }
-        if (selected) row.setBackgroundResource(R.drawable.bg_row_selected)
-        row.setOnClickListener { onOpen() }
-        row.findViewById<View>(R.id.tabClose).apply {
-            pressable()
-            setOnClickListener { onClose(row) }
-        }
-        if (animate) {
-            row.alpha = 0f
-            row.translationY = dp(14).toFloat()
-            row.animate().alpha(1f).translationY(0f).setStartDelay(60L + index * 35L)
-                .setDuration(280).setInterpolator(Motion.decelerate).start()
-        }
-        return row
-    }
-
-    private fun slideOut(row: View, then: () -> Unit) {
-        row.animate().translationX(row.width.toFloat()).alpha(0f).setDuration(Motion.SHORT + 40)
-            .setInterpolator(Motion.accelerate).withEndAction { then() }.start()
-    }
-
-    private fun smoothRemoval(list: LinearLayout) {
-        list.layoutTransition = LayoutTransition().apply {
-            disableTransitionType(LayoutTransition.APPEARING)
-            disableTransitionType(LayoutTransition.DISAPPEARING)
-            setDuration(220)
-        }
-    }
-
-    private fun showTabs() {
-        val (sheet, content, list) = sheetContent(R.string.tabs)
-
-        fun fill(animate: Boolean) {
-            list.removeAllViews()
-            tabs.toList().forEachIndexed { index, tab ->
-                val view = row(
-                    list, titleOf(tab), display(urlOf(tab)), index, animate,
-                    onOpen = {
-                        select(tab)
-                        sheet.dismiss()
-                    },
-                    onClose = { row ->
-                        val refill = tabs.size == 1 || tab === current
-                        slideOut(row) {
-                            closeTab(tab)
-                            if (refill) fill(false) else list.removeView(row)
-                        }
-                    },
-                    favicon = tab.favicon,
-                    selected = tab === current,
-                )
-                list.addView(view)
-            }
-        }
-
-        content.findViewById<View>(R.id.newTab).apply {
-            pressable(0.95f)
-            setOnClickListener {
-                newTab(home())
-                sheet.dismiss()
-            }
-        }
-        fill(true)
-        smoothRemoval(list)
-        sheet.setContentView(content)
-        sheet.show()
-    }
-
-    private fun showBookmarks() {
-        val (sheet, content, list) = sheetContent(R.string.bookmarks)
-        content.findViewById<View>(R.id.newTab).isGone = true
-
-        fun fill() {
-            list.removeAllViews()
-            val items = Bookmarks.all(this)
-            if (items.isEmpty()) list.addView(emptyView(R.string.empty_bookmarks))
-            items.forEachIndexed { index, item ->
-                list.addView(row(
-                    list, item.title.ifBlank { item.url }, display(item.url), index, true,
-                    onOpen = {
-                        open(item.url)
-                        sheet.dismiss()
-                    },
-                    onClose = { row ->
-                        slideOut(row) {
-                            Bookmarks.remove(this, item.url)
-                            list.removeView(row)
-                            if (list.childCount == 0) fill()
-                        }
-                    },
-                ))
-            }
-        }
-
-        fill()
-        smoothRemoval(list)
-        sheet.setContentView(content)
-        sheet.show()
+    override fun closeTab(id: Long) {
+        tabs.firstOrNull { it.id == id }?.let(::closeTab)
     }
 
     // endregion
@@ -508,15 +325,13 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val detail = if (size > 0) Formatter.formatShortFileSize(this, size) else getString(R.string.unknown_size)
-        MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.download_title)
-            .setMessage("$name\n$detail\n\n${getString(R.string.save_to)}: ${Storage.label(this)}" + if (risky) "\n\n" + getString(R.string.download_risky) else "")
-            .setPositiveButton(R.string.download) { _, _ -> onConfirm() }
-            .setNeutralButton(R.string.change_folder) { _, _ ->
-                folderPicker.show { confirmDownload(name, size, onConfirm) }
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+        val message = "$name\n$detail\n\n${getString(R.string.save_to)}: ${Storage.label(this)}" +
+            if (risky) "\n\n" + getString(R.string.download_risky) else ""
+        ui.prompt = Prompt.Download(
+            message = message,
+            onConfirm = onConfirm,
+            onChangeFolder = { folderPicker.show { confirmDownload(name, size, onConfirm) } },
+        )
     }
 
     /** The system downloader fails when the target file exists, so repeat downloads get a numbered name. */
@@ -589,9 +404,14 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun openDownloads() {
+    override fun openDownloads() {
         val options = ActivityOptions.makeCustomAnimation(this, R.anim.enter_from_right, R.anim.exit_to_left)
         startActivity(Intent(this, DownloadsActivity::class.java), options.toBundle())
+    }
+
+    override fun openSettings() {
+        val options = ActivityOptions.makeCustomAnimation(this, R.anim.enter_from_right, R.anim.exit_to_left)
+        startActivity(Intent(this, SettingsActivity::class.java), options.toBundle())
     }
 
     private fun blobScript(url: String, token: String) = """
@@ -659,127 +479,12 @@ class MainActivity : AppCompatActivity() {
 
     // endregion
 
-    // region history and suggestions
+    // region history
 
     private fun recordVisit(tab: Tab, url: String?) {
         if (url != null && url == tab.errorUrl) return
         if (url == null || !prefs.getBoolean(Prefs.SAVE_HISTORY, true)) return
         History.record(this, tab.title.ifBlank { url }, url)
-    }
-
-    private fun emptyView(text: Int) = TextView(this).apply {
-        setText(text)
-        setTextColor(themeColor(R.attr.brisaMuted))
-        setPadding(dp(24), dp(12), dp(24), dp(12))
-    }
-
-    private fun showHistory() {
-        val (sheet, content, list) = sheetContent(R.string.history)
-        val clearButton = content.findViewById<TextView>(R.id.newTab)
-        clearButton.setText(R.string.clear_history)
-
-        fun fill() {
-            list.removeAllViews()
-            val items = History.all(this).take(100)
-            if (items.isEmpty()) list.addView(emptyView(R.string.empty_history))
-            items.forEachIndexed { index, entry ->
-                val age = DateUtils.getRelativeTimeSpanString(
-                    entry.time, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS,
-                )
-                list.addView(row(
-                    list, entry.title.ifBlank { entry.url }, "${display(entry.url)} · $age",
-                    minOf(index, 10), true,
-                    onOpen = {
-                        open(entry.url)
-                        sheet.dismiss()
-                    },
-                    onClose = { row ->
-                        slideOut(row) {
-                            History.remove(this, entry.url)
-                            list.removeView(row)
-                            if (list.childCount == 0) fill()
-                        }
-                    },
-                ))
-            }
-        }
-
-        clearButton.pressable(0.95f)
-        clearButton.setOnClickListener {
-            History.clear(this)
-            fill()
-        }
-        fill()
-        smoothRemoval(list)
-        sheet.setContentView(content)
-        sheet.show()
-    }
-
-    private fun renderSuggestions(query: String) {
-        val q = query.trim()
-        if (q.isEmpty()) {
-            hideSuggestions()
-            return
-        }
-        ui.suggestions.removeAllViews()
-        val target = resolve(q)
-        val isSearch = target == searchUrl(q)
-        ui.suggestions.addView(
-            suggestionRow(
-                if (isSearch) R.drawable.ic_search else R.drawable.ic_arrow_forward,
-                q,
-                if (isSearch) getString(R.string.search_with, SearchEngines.current(prefs).name) else target,
-            ) { open(target) },
-        )
-        val seen = mutableSetOf<String>()
-        val bookmarks = Bookmarks.all(this).filter { matches(it.title, it.url, q) }
-            .map { Triple(R.drawable.ic_star, it.title, it.url) }
-        val visited = History.all(this).filter { matches(it.title, it.url, q) }
-            .map { Triple(R.drawable.ic_history, it.title, it.url) }
-        (bookmarks + visited).filter { seen.add(it.third) }.take(5).forEach { (icon, title, url) ->
-            ui.suggestions.addView(suggestionRow(icon, title.ifBlank { url }, display(url)) { open(url) })
-        }
-        showSuggestions()
-    }
-
-    private fun matches(title: String, url: String, query: String) =
-        title.contains(query, ignoreCase = true) || url.contains(query, ignoreCase = true)
-
-    private fun suggestionRow(icon: Int, title: String, subtitle: String, onClick: () -> Unit): View {
-        val row = layoutInflater.inflate(R.layout.item_suggestion, ui.suggestions, false)
-        row.findViewById<ImageView>(R.id.suggestIcon).setImageResource(icon)
-        row.findViewById<TextView>(R.id.suggestTitle).text = title
-        row.findViewById<TextView>(R.id.suggestSubtitle).apply {
-            text = subtitle
-            isGone = subtitle.isEmpty()
-        }
-        row.setOnClickListener {
-            onClick()
-            ui.urlBar.clearFocus()
-            hideKeyboard(ui.urlBar)
-        }
-        return row
-    }
-
-    private fun showSuggestions() {
-        if (suggestShown) return
-        suggestShown = true
-        ui.suggestions.animate().cancel()
-        ui.suggestions.alpha = 0f
-        ui.suggestions.translationY = suggestOffset()
-        ui.suggestions.isVisible = true
-        ui.suggestions.animate().alpha(1f).translationY(0f).setDuration(Motion.SHORT)
-            .setInterpolator(Motion.decelerate).start()
-    }
-
-    private fun suggestOffset() = if (toolbarBottom) dp(8).toFloat() else -dp(8).toFloat()
-
-    private fun hideSuggestions() {
-        if (!suggestShown) return
-        suggestShown = false
-        ui.suggestions.animate().cancel()
-        ui.suggestions.animate().alpha(0f).translationY(suggestOffset()).setDuration(100)
-            .withEndAction { if (!suggestShown) ui.suggestions.isGone = true }.start()
     }
 
     // endregion
@@ -836,12 +541,14 @@ class MainActivity : AppCompatActivity() {
                 tab.favicon = null
                 setLoading(tab, true)
                 if (tab === current) showUrl(url)
+                syncTabs()
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
                 setLoading(tab, false)
                 if (tab === current) showUrl(url)
                 recordVisit(tab, url)
+                syncTabs()
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
@@ -855,7 +562,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     tab.sslBlocked || failed == tab.errorUrl || error.description.contains("ERR_ABORTED") -> Unit
                     else -> {
-                        val (title, detail) = errorStrings(error.errorCode, isPrivateHost(request.url.host))
+                        val (title, detail) = errorStrings(error.errorCode, Urls.isPrivateHost(request.url.host))
                         showError(tab, failed, title, detail, error.description.toString())
                     }
                 }
@@ -897,16 +604,18 @@ class MainActivity : AppCompatActivity() {
 
             override fun onProgressChanged(view: WebView, newProgress: Int) {
                 tab.progress = newProgress
-                if (tab === current) ui.progress.setProgressCompat(newProgress, true)
+                if (tab === current) ui.progress = newProgress
             }
 
             override fun onReceivedIcon(view: WebView, icon: Bitmap?) {
                 tab.favicon = icon
+                syncTabs()
             }
 
             override fun onReceivedTitle(view: WebView, title: String?) {
                 tab.title = title.orEmpty()
                 recordVisit(tab, view.url)
+                syncTabs()
             }
 
             override fun onShowFileChooser(
@@ -926,16 +635,12 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onShowCustomView(view: View, callback: WebChromeClient.CustomViewCallback) {
-                if (customView != null) {
+                if (ui.customView != null) {
                     callback.onCustomViewHidden()
                     return
                 }
-                customView = view
                 customCallback = callback
-                ui.fullscreen.addView(view)
-                ui.fullscreen.alpha = 0f
-                ui.fullscreen.isVisible = true
-                ui.fullscreen.animate().alpha(1f).setDuration(Motion.MEDIUM).start()
+                ui.customView = view
                 WindowCompat.getInsetsController(window, window.decorView).apply {
                     systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                     hide(WindowInsetsCompat.Type.systemBars())
@@ -955,7 +660,7 @@ class MainActivity : AppCompatActivity() {
         tab.web.setOnLongClickListener { showContextMenu(tab) }
         tab.web.setFindListener { active, matches, done ->
             if (done && tab === current) {
-                ui.findCount.text = if (matches == 0) "0/0" else "${active + 1}/$matches"
+                ui.findCount = if (matches == 0) "0/0" else "${active + 1}/$matches"
             }
         }
 
@@ -1013,19 +718,17 @@ class MainActivity : AppCompatActivity() {
     /** Hands mailto:, tel:, intent: and similar links to another app, after the user confirms. */
     private fun openExternal(url: String, tab: Tab) {
         val link = parseExternal(url) ?: return
-        MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.external_title)
-            .setMessage(getString(R.string.external_message, link.label.take(120)))
-            .setPositiveButton(R.string.external_open) { _, _ ->
+        ui.prompt = Prompt.External(
+            message = getString(R.string.external_message, link.label.take(120)),
+            onOpen = {
                 try {
                     startActivity(link.intent)
                 } catch (e: Exception) {
                     val fallback = link.fallback
                     if (fallback != null) open(fallback, tab) else notify(R.string.external_missing)
                 }
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+            },
+        )
     }
 
     private fun parseExternal(url: String): ExternalLink? {
@@ -1056,7 +759,7 @@ class MainActivity : AppCompatActivity() {
         return ExternalLink(intent, fallback, intent.`package` ?: intent.dataString.orEmpty())
     }
 
-    private fun reload() {
+    override fun reload() {
         val failed = current.errorUrl
         if (failed != null) open(failed) else web.reload()
     }
@@ -1078,29 +781,35 @@ class MainActivity : AppCompatActivity() {
     /** Replaces WebView's plain error page with one that follows the theme. */
     private fun showError(tab: Tab, url: String, title: String, detail: String, technical: String) {
         tab.errorUrl = url
-        fun hex(attr: Int) = String.format("#%06X", 0xFFFFFF and themeColor(attr))
+        val settings = Appearance.read(prefs)
+        val scheme = Appearance.colorScheme(this, settings, Appearance.isDark(this, settings))
         fun esc(text: String) = TextUtils.htmlEncode(text)
+        val bg = Appearance.hex(scheme.surface)
+        val onBg = Appearance.hex(scheme.onSurface)
+        val muted = Appearance.hex(scheme.onSurfaceVariant)
+        val accent = Appearance.hex(scheme.primary)
+        val onAccent = Appearance.hex(scheme.onPrimary)
         val html = """
             <!doctype html><html lang="en"><head><meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <title>${esc(title)}</title>
             <style>
             body { margin: 0; min-height: 100vh; box-sizing: border-box; padding: 32px; display: flex; flex-direction: column;
-                   justify-content: center; background: ${hex(R.attr.brisaBg)}; color: ${hex(R.attr.brisaOnBg)};
+                   justify-content: center; background: $bg; color: $onBg;
                    font: 16px/1.5 system-ui, sans-serif; animation: in .24s cubic-bezier(.05, .7, .1, 1); }
             @keyframes in { from { opacity: 0; transform: translateY(8px); } }
             @media (prefers-reduced-motion: reduce) { body { animation: none; } }
-            svg { width: 48px; height: 48px; margin-bottom: 20px; fill: ${hex(R.attr.brisaMuted)}; }
+            svg { width: 48px; height: 48px; margin-bottom: 20px; fill: $muted; }
             h1 { font-size: 22px; font-weight: 500; margin: 0 0 4px; }
-            .host { margin: 0 0 16px; color: ${hex(R.attr.brisaAccent)}; word-break: break-all; }
-            p { margin: 0 0 24px; color: ${hex(R.attr.brisaMuted)}; }
+            .host { margin: 0 0 16px; color: $accent; word-break: break-all; }
+            p { margin: 0 0 24px; color: $muted; }
             a { align-self: flex-start; padding: 12px 24px; border-radius: 24px; text-decoration: none; font-weight: 500;
-                background: ${hex(R.attr.brisaAccent)}; color: ${hex(R.attr.brisaOnAccent)}; }
-            code { margin-top: 28px; font-size: 12px; color: ${hex(R.attr.brisaMuted)}; word-break: break-all; }
+                background: $accent; color: $onAccent; }
+            code { margin-top: 28px; font-size: 12px; color: $muted; word-break: break-all; }
             </style></head><body>
             <svg viewBox="0 0 24 24"><path d="M1,21h22L12,2 1,21zM13,18h-2v-2h2v2zM13,14h-2v-4h2v4z"/></svg>
             <h1>${esc(title)}</h1>
-            <div class="host">${esc(display(url).ifEmpty { url })}</div>
+            <div class="host">${esc(displayUrl(url).ifEmpty { url })}</div>
             <p>${esc(detail)}</p>
             <a href="${esc(url)}">${esc(getString(R.string.error_retry))}</a>
             <code>${esc(technical)}</code>
@@ -1111,37 +820,32 @@ class MainActivity : AppCompatActivity() {
 
     /** Asks for a username and password, as a normal browser does for HTTP authentication. */
     private fun askCredentials(view: WebView, handler: HttpAuthHandler, host: String, realm: String?) {
-        if (isFinishing || isDestroyed || authDialog?.isShowing == true) {
+        if (isFinishing || isDestroyed || ui.prompt != null) {
             handler.cancel()
             return
         }
-        val form = DialogHttpAuthBinding.inflate(layoutInflater)
         val bare = runCatching { Uri.parse("http://$host").host }.getOrNull() ?: host
-        val insecure = view.url?.startsWith("http://") == true && !isPrivateHost(bare)
-        form.authMessage.text = getString(R.string.auth_message, host) + if (realm.isNullOrBlank()) "" else "\n$realm"
-        form.authWarning.isVisible = insecure
-        authDialog = MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.auth_title)
-            .setView(form.root)
-            .setPositiveButton(R.string.auth_sign_in) { _, _ ->
-                handler.proceed(form.authUser.text?.toString().orEmpty(), form.authPass.text?.toString().orEmpty())
-            }
-            .setNegativeButton(android.R.string.cancel) { _, _ -> handler.cancel() }
-            .setOnCancelListener { handler.cancel() }
-            .setOnDismissListener { form.authPass.text?.clear() }
-            .create()
-            .also {
-                it.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
-                it.show()
-            }
-        form.authUser.requestFocus()
+        val insecure = view.url?.startsWith("http://") == true && !Urls.isPrivateHost(bare)
+        val message = getString(R.string.auth_message, host) + if (realm.isNullOrBlank()) "" else "\n$realm"
+        ui.prompt = Prompt.Auth(
+            message = message,
+            insecure = insecure,
+            onSubmit = { user, pass ->
+                ui.prompt = null
+                handler.proceed(user, pass)
+            },
+            onCancel = {
+                ui.prompt = null
+                handler.cancel()
+            },
+        )
     }
 
     private fun headers(): Map<String, String> =
         if (prefs.getBoolean(Prefs.SEND_DNT, true)) mapOf("DNT" to "1", "Sec-GPC" to "1") else emptyMap()
 
     private fun shouldUpgrade(uri: Uri) =
-        prefs.getBoolean(Prefs.HTTPS_FIRST, true) && !isPrivateHost(uri.host)
+        prefs.getBoolean(Prefs.HTTPS_FIRST, true) && !Urls.isPrivateHost(uri.host)
 
     private fun open(url: String, tab: Tab = current) {
         val uri = Uri.parse(url)
@@ -1158,11 +862,9 @@ class MainActivity : AppCompatActivity() {
         tab.web.loadUrl(target, headers())
     }
 
-    private fun isPrivateHost(host: String?) = Urls.isPrivateHost(host)
-
     private fun resolve(input: String) = Urls.resolve(input, ::searchUrl)
 
-    private fun searchUrl(query: String) = SearchEngines.current(prefs).url(query)
+    override fun searchUrl(query: String) = SearchEngines.current(prefs).url(query)
 
     private fun home(): String {
         val custom = prefs.getString(Prefs.HOMEPAGE, "").orEmpty().trim()
@@ -1177,209 +879,52 @@ class MainActivity : AppCompatActivity() {
 
     // endregion
 
-    // region ui
+    // region BrowserHost
 
-    private fun setupBars() {
-        listOf(ui.tabsButton, ui.menu, ui.clearUrl, ui.findPrev, ui.findNext, ui.findClose).forEach { it.pressable() }
+    override fun canScrollUp() = web.scrollY > 0
 
-        ui.swipe.setColorSchemeColors(themeColor(R.attr.brisaAccent))
-        ui.swipe.setProgressBackgroundColorSchemeColor(themeColor(R.attr.brisaPopup))
-        ui.swipe.setOnChildScrollUpCallback { _, _ -> web.scrollY > 0 }
-        ui.swipe.setOnRefreshListener { reload() }
+    override fun currentUrl(): String = web.url.orEmpty()
 
-        ui.urlBar.setOnEditorActionListener { v, action, _ ->
-            if (action == EditorInfo.IME_ACTION_GO) {
-                open(resolve(v.text.toString()))
-                v.clearFocus()
-                hideKeyboard(v)
-                true
-            } else false
-        }
-        ui.urlBar.setOnFocusChangeListener { _, focused ->
-            ui.urlBar.setText(if (focused) web.url.orEmpty() else display(web.url))
-            if (focused) ui.urlBar.selectAll()
-            animateFocus(focused)
-            if (!focused) hideSuggestions()
-            updateSiteIcon(web.url)
-            updateClear()
-        }
-        ui.urlBar.doOnTextChanged { text, _, _, _ ->
-            updateClear()
-            val typed = text?.toString().orEmpty()
-            if (ui.urlBar.hasFocus() && typed.isNotEmpty() && typed != web.url.orEmpty()) renderSuggestions(typed)
-            else hideSuggestions()
-        }
-        ui.clearUrl.setOnClickListener { ui.urlBar.text?.clear() }
-        ui.tabsButton.setOnClickListener { showTabs() }
-        ui.menu.setOnClickListener { showMenu() }
+    override fun submit(input: String) = open(resolve(input))
 
-        ui.findInput.doOnTextChanged { text, _, _, _ ->
-            if (text.isNullOrEmpty()) {
-                web.clearMatches()
-                ui.findCount.text = ""
-            } else {
-                web.findAllAsync(text.toString())
-            }
-        }
-        ui.findInput.setOnEditorActionListener { _, action, _ ->
-            if (action == EditorInfo.IME_ACTION_SEARCH) web.findNext(true)
-            true
-        }
-        ui.findNext.setOnClickListener { web.findNext(true) }
-        ui.findPrev.setOnClickListener { web.findNext(false) }
-        ui.findClose.setOnClickListener { closeFind() }
-    }
+    override fun openUrl(url: String) = open(url)
 
-    private fun animateFocus(focused: Boolean) {
-        val accent = themeColor(R.attr.brisaAccent)
-        val clear = accent and 0x00FFFFFF
-        ValueAnimator.ofArgb(if (focused) clear else accent, if (focused) accent else clear).apply {
-            duration = Motion.MEDIUM
-            interpolator = Motion.standard
-            addUpdateListener { omniBg.setStroke(dp(2), it.animatedValue as Int) }
-            start()
-        }
-    }
+    override fun resolveInput(input: String) = resolve(input)
 
-    private fun updateSiteIcon(url: String?) {
-        val (icon, color) = when {
-            ui.urlBar.hasFocus() || url.isNullOrEmpty() -> R.drawable.ic_search to R.attr.brisaMuted
-            url.orEmpty().startsWith("https://") -> R.drawable.ic_lock to R.attr.brisaMuted
-            else -> R.drawable.ic_lock_open to R.attr.brisaWarning
-        }
-        if (ui.siteIcon.tag == icon) return
-        ui.siteIcon.tag = icon
-        ui.siteIcon.animate().cancel()
-        ui.siteIcon.animate().alpha(0f).setDuration(80).withEndAction {
-            ui.siteIcon.setImageResource(icon)
-            ui.siteIcon.imageTintList = ColorStateList.valueOf(themeColor(color))
-            ui.siteIcon.animate().alpha(1f).setDuration(140).start()
-        }.start()
-    }
+    override fun engineName(): String = SearchEngines.current(prefs).name
 
-    private fun updateClear() {
-        val show = ui.urlBar.hasFocus() && !ui.urlBar.text.isNullOrEmpty()
-        if (show == clearShown) return
-        clearShown = show
-        ui.clearUrl.animate().cancel()
-        if (show) {
-            ui.clearUrl.alpha = 0f
-            ui.clearUrl.scaleX = 0.6f
-            ui.clearUrl.scaleY = 0.6f
-            ui.clearUrl.isVisible = true
-            ui.clearUrl.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(Motion.SHORT)
-                .setInterpolator(Motion.decelerate).start()
-        } else {
-            ui.clearUrl.animate().alpha(0f).scaleX(0.6f).scaleY(0.6f).setDuration(100)
-                .withEndAction { if (!clearShown) ui.clearUrl.isGone = true }.start()
-        }
-    }
-
-    private fun showMenu() {
-        ui.menu.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
-        val m = MenuPopupBinding.inflate(layoutInflater)
-        val popup = PopupWindow(m.root, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, true)
-        popup.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-
+    override fun menuInfo(): MenuInfo {
         val url = web.url
-        val bookmarked = url != null && Bookmarks.contains(this, url)
-        m.iconBack.enable(web.canGoBack())
-        m.iconForward.enable(web.canGoForward())
-        m.iconBookmark.enable(url != null)
-        m.iconBookmark.setImageResource(if (bookmarked) R.drawable.ic_star else R.drawable.ic_star_border)
-        m.iconBookmark.contentDescription =
-            getString(if (bookmarked) R.string.remove_bookmark else R.string.add_bookmark)
-        m.iconReload.setImageResource(if (current.loading) R.drawable.ic_close else R.drawable.ic_refresh)
-        m.iconReload.contentDescription = getString(if (current.loading) R.string.stop else R.string.reload)
-        m.desktopSwitch.isChecked = prefs.getBoolean(Prefs.DESKTOP, false)
-
-        fun close(action: () -> Unit) {
-            m.card.animate().alpha(0f).scaleX(0.9f).scaleY(0.9f).setDuration(Motion.SHORT)
-                .setInterpolator(Motion.accelerate).withEndAction {
-                    popup.dismiss()
-                    action()
-                }.start()
-        }
-
-        fun bind(view: View, action: () -> Unit) {
-            view.setOnClickListener { close(action) }
-        }
-
-        listOf(m.iconBack, m.iconForward, m.iconBookmark, m.iconReload).forEach { it.pressable() }
-        bind(m.iconBack) { web.goBack() }
-        bind(m.iconForward) { web.goForward() }
-        bind(m.iconBookmark) { toggleBookmark() }
-        bind(m.iconReload) { if (current.loading) web.stopLoading() else reload() }
-        bind(m.rowNewTab) { newTab(home()) }
-        bind(m.rowFind) { openFind() }
-        bind(m.rowShare) { share() }
-        bind(m.rowBookmarks) { showBookmarks() }
-        bind(m.rowDownloads) { openDownloads() }
-        bind(m.rowHistory) { showHistory() }
-        bind(m.rowSettings) {
-            val options = ActivityOptions.makeCustomAnimation(this, R.anim.enter_from_right, R.anim.exit_to_left)
-            startActivity(Intent(this, SettingsActivity::class.java), options.toBundle())
-        }
-        m.rowDesktop.setOnClickListener {
-            m.desktopSwitch.toggle()
-            m.root.postDelayed({ close { toggleDesktop() } }, 170)
-        }
-
         val siteHost = Uri.parse(urlOf(current).orEmpty()).host
-        val protection = prefs.getString(Prefs.TRACKER_LEVEL, "standard") != "off" && siteHost != null
-        val excepted = SiteExceptions.isAllowed(siteHost)
-        m.rowProtection.isVisible = protection
-        m.protectionSwitch.isChecked = !excepted
-        m.protectionSub.text =
-            if (excepted) getString(R.string.protection_off_site) else getString(R.string.blocked_on_page, current.blocked.get())
-        m.rowProtection.setOnClickListener {
-            m.protectionSwitch.toggle()
-            if (siteHost != null) {
-                if (m.protectionSwitch.isChecked) SiteExceptions.remove(this, siteHost) else SiteExceptions.add(this, siteHost)
-            }
-            m.root.postDelayed({ close { reload() } }, 170)
-        }
-
-        val items = listOf<View>(
-            m.iconRow, m.rowNewTab, m.rowFind, m.rowShare, m.rowBookmarks, m.rowDownloads, m.rowHistory,
-            m.rowDesktop, m.rowProtection, m.rowSettings,
+        val level = prefs.getString(Prefs.TRACKER_LEVEL, "standard")
+        return MenuInfo(
+            canGoBack = web.canGoBack(),
+            canGoForward = web.canGoForward(),
+            canBookmark = url != null,
+            bookmarked = url != null && Bookmarks.contains(this, url),
+            loading = current.loading,
+            desktop = prefs.getBoolean(Prefs.DESKTOP, false),
+            showProtection = level != "off" && siteHost != null,
+            protectionOn = !SiteExceptions.isAllowed(siteHost),
+            blocked = current.blocked.get(),
         )
-        m.card.doOnLayout { card ->
-            card.pivotX = card.width.toFloat()
-            card.pivotY = if (toolbarBottom) card.height.toFloat() else 0f
-            card.alpha = 0f
-            card.scaleX = 0.8f
-            card.scaleY = 0.8f
-            card.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(Motion.MEDIUM)
-                .setInterpolator(Motion.decelerate).start()
-            items.forEachIndexed { i, item ->
-                item.alpha = 0f
-                item.translationY = dp(8).toFloat()
-                item.animate().alpha(1f).translationY(0f).setStartDelay(50L + i * 28L)
-                    .setDuration(220).setInterpolator(Motion.decelerate).start()
-            }
-        }
-        if (toolbarBottom) {
-            val at = IntArray(2)
-            ui.menu.getLocationInWindow(at)
-            popup.showAtLocation(ui.root, Gravity.BOTTOM or Gravity.END, dp(2), ui.root.height - at[1] + dp(2))
-        } else {
-            popup.showAsDropDown(ui.menu, 0, -dp(4), Gravity.END)
-        }
     }
 
-    private fun View.enable(on: Boolean) {
-        isEnabled = on
-        alpha = if (on) 1f else 0.38f
+    override fun goBackPage() = web.goBack()
+
+    override fun goForwardPage() = web.goForward()
+
+    override fun reloadOrStop() {
+        if (current.loading) web.stopLoading() else reload()
     }
 
-    private fun toggleDesktop() {
+    override fun toggleDesktop() {
         prefs.edit { putBoolean(Prefs.DESKTOP, !prefs.getBoolean(Prefs.DESKTOP, false)) }
         tabs.forEach(::applySettings)
         reload()
     }
 
-    private fun toggleBookmark() {
+    override fun toggleBookmark() {
         val url = web.url ?: return
         if (Bookmarks.contains(this, url)) {
             Bookmarks.remove(this, url)
@@ -1390,39 +935,53 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun openFind() {
-        if (!ui.findBar.isVisible) {
-            ui.findBar.isVisible = true
-            ui.findBar.alpha = 0f
-            ui.findBar.translationY = dp(24).toFloat()
-            ui.findBar.animate().alpha(1f).translationY(0f).setDuration(Motion.MEDIUM)
-                .setInterpolator(Motion.decelerate).start()
+    override fun setProtection(on: Boolean) {
+        val host = Uri.parse(urlOf(current).orEmpty()).host ?: return
+        if (on) SiteExceptions.remove(this, host) else SiteExceptions.add(this, host)
+        reload()
+    }
+
+    override fun openFind() {
+        ui.findVisible = true
+    }
+
+    override fun onFind(query: String) {
+        if (query.isEmpty()) {
+            web.clearMatches()
+            ui.findCount = ""
+        } else {
+            web.findAllAsync(query)
         }
-        ui.findInput.requestFocus()
-        getSystemService(InputMethodManager::class.java).showSoftInput(ui.findInput, 0)
     }
 
-    private fun closeFind() {
-        if (!ui.findBar.isVisible) return
+    override fun findNext(forward: Boolean) = web.findNext(forward)
+
+    override fun closeFind() {
+        if (!ui.findVisible) return
         web.clearMatches()
-        ui.findInput.text?.clear()
-        ui.findCount.text = ""
-        hideKeyboard(ui.findInput)
-        ui.findBar.animate().alpha(0f).translationY(dp(24).toFloat()).setDuration(Motion.SHORT)
-            .setInterpolator(Motion.accelerate).withEndAction { ui.findBar.isGone = true }.start()
+        ui.findQuery = ""
+        ui.findCount = ""
+        ui.findVisible = false
     }
 
-    private fun exitFullscreen() {
-        val view = customView ?: return
-        customView = null
-        ui.fullscreen.animate().alpha(0f).setDuration(Motion.SHORT).withEndAction {
-            ui.fullscreen.removeView(view)
-            ui.fullscreen.isGone = true
-        }.start()
+    override fun exitFullscreen() {
+        val view = ui.customView ?: return
+        ui.customView = null
+        (view.parent as? ViewGroup)?.removeView(view)
         customCallback?.onCustomViewHidden()
         customCallback = null
         WindowCompat.getInsetsController(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
     }
+
+    override fun share() {
+        val url = web.url ?: return
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, url)
+        startActivity(Intent.createChooser(send, null))
+    }
+
+    // endregion
+
+    // region ui helpers
 
     /** Long press on a link or image: shows the full address first, which also helps spot fake links. */
     private fun showContextMenu(tab: Tab): Boolean {
@@ -1438,7 +997,7 @@ class MainActivity : AppCompatActivity() {
                 true
             }
             WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE -> {
-                val handler = android.os.Handler(android.os.Looper.getMainLooper()) { message ->
+                val handler = Handler(Looper.getMainLooper()) { message ->
                     linkMenu(tab, message.data.getString("url")?.takeIf { it.startsWith("http") }, extra)
                     true
                 }
@@ -1450,29 +1009,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun linkMenu(tab: Tab, link: String?, image: String?) {
-        val actions = mutableListOf<Pair<Int, () -> Unit>>()
+        val actions = mutableListOf<Pair<String, () -> Unit>>()
         if (link != null) {
-            actions += R.string.open_new_tab to { newTab(link) }
-            actions += R.string.copy_link to { copyText(link) }
-            actions += R.string.share_link to { shareText(link) }
+            actions += getString(R.string.open_new_tab) to { newTab(link) }
+            actions += getString(R.string.copy_link) to { copyText(link) }
+            actions += getString(R.string.share_link) to { shareText(link) }
         }
         if (image != null) {
-            actions += R.string.open_image to { newTab(image) }
-            actions += R.string.save_image to {
+            actions += getString(R.string.open_image) to { newTab(image) }
+            actions += getString(R.string.save_image) to {
                 startDownload(tab.web, image, tab.web.settings.userAgentString, null, null, -1)
             }
-            actions += R.string.copy_image_link to { copyText(image) }
+            actions += getString(R.string.copy_image_link) to { copyText(image) }
         }
         if (actions.isEmpty()) return
-        MaterialAlertDialogBuilder(this)
-            .setTitle((link ?: image).orEmpty().take(100))
-            .setItems(actions.map { getString(it.first) }.toTypedArray()) { _, index -> actions[index].second() }
-            .show()
+        ui.prompt = Prompt.LinkMenu((link ?: image).orEmpty().take(100), actions)
     }
 
     private fun copyText(text: String) {
-        getSystemService(android.content.ClipboardManager::class.java)
-            .setPrimaryClip(android.content.ClipData.newPlainText("link", text))
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("link", text))
         notify(R.string.link_copied)
     }
 
@@ -1487,42 +1042,22 @@ class MainActivity : AppCompatActivity() {
     private fun checkEngineAge() {
         val engine = WebView.getCurrentWebViewPackage() ?: return
         val now = System.currentTimeMillis()
-        val days = (now - engine.lastUpdateTime) / android.text.format.DateUtils.DAY_IN_MILLIS
+        val days = (now - engine.lastUpdateTime) / DateUtils.DAY_IN_MILLIS
         if (days < ENGINE_MAX_AGE_DAYS) return
-        if (now - prefs.getLong(Prefs.WEBVIEW_WARNED, 0) < android.text.format.DateUtils.WEEK_IN_MILLIS) return
+        if (now - prefs.getLong(Prefs.WEBVIEW_WARNED, 0) < DateUtils.WEEK_IN_MILLIS) return
         prefs.edit { putLong(Prefs.WEBVIEW_WARNED, now) }
-        Snackbar.make(ui.root, getString(R.string.webview_old, days), Snackbar.LENGTH_LONG)
-            .setAction(R.string.update) {
-                val store = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${engine.packageName}"))
-                try {
-                    startActivity(store)
-                } catch (e: Exception) {
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=${engine.packageName}")))
-                }
+        notify(getString(R.string.webview_old, days), R.string.update) {
+            val store = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${engine.packageName}"))
+            try {
+                startActivity(store)
+            } catch (e: Exception) {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=${engine.packageName}")))
             }
-            .show()
-    }
-
-    private fun share() {
-        val url = web.url ?: return
-        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, url)
-        startActivity(Intent.createChooser(send, null))
-    }
-
-    private fun hideKeyboard(view: View) {
-        getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(view.windowToken, 0)
-    }
-
-    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
-
-    private fun display(url: String?): String {
-        if (url.isNullOrEmpty()) return ""
-        return Uri.parse(url).host?.removePrefix("www.") ?: url
+        }
     }
 
     private fun showUrl(url: String?) {
-        if (!ui.urlBar.hasFocus()) ui.urlBar.setText(display(url))
-        updateSiteIcon(url)
+        ui.pageUrl = url
     }
 
     private fun setLoading(tab: Tab, on: Boolean) {
@@ -1531,38 +1066,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderLoading() {
-        ui.progress.animate().cancel()
-        if (current.loading) {
-            ui.progress.alpha = 1f
-            ui.progress.isVisible = true
-        } else {
-            ui.swipe.isRefreshing = false
-            ui.progress.animate().alpha(0f).setDuration(260).setStartDelay(120)
-                .withEndAction { ui.progress.isGone = true }.start()
-        }
+        ui.loading = current.loading
+        if (!current.loading) ui.refreshing = false
     }
 
-    private fun notify(message: Int) = notify(getString(message))
+    private fun notify(@StringRes message: Int) = notify(getString(message))
 
-    private fun notify(message: String, actionLabel: Int? = null, action: (() -> Unit)? = null) {
-        Snackbar.make(ui.root, message, Snackbar.LENGTH_LONG).apply {
-            if (actionLabel != null && action != null) setAction(actionLabel) { action() }
-            if (toolbarBottom) anchorView = ui.topBar
-            show()
+    private fun notify(message: String, @StringRes actionLabel: Int? = null, action: (() -> Unit)? = null) {
+        lifecycleScope.launch {
+            ui.snackbar.currentSnackbarData?.dismiss()
+            val result = ui.snackbar.showSnackbar(
+                message = message,
+                actionLabel = actionLabel?.let { getString(it) },
+                duration = SnackbarDuration.Long,
+            )
+            if (result == SnackbarResult.ActionPerformed) action?.invoke()
         }
     }
 
     /** Moves the address bar to the top or bottom of the screen, following Settings. */
     private fun applyToolbarPosition() {
-        val bottom = prefs.getString(Prefs.TOOLBAR, "top") == "bottom"
-        if (bottom == toolbarBottom && ui.content.getChildAt(0) === (if (bottom) ui.webFrame else ui.topBar)) return
-        toolbarBottom = bottom
-        val order = if (bottom) listOf(ui.webFrame, ui.findBar, ui.progress, ui.topBar)
-        else listOf(ui.topBar, ui.progress, ui.webFrame, ui.findBar)
-        ui.content.removeAllViews()
-        order.forEach { ui.content.addView(it) }
-        (ui.suggestions.layoutParams as FrameLayout.LayoutParams).gravity = if (bottom) Gravity.BOTTOM else Gravity.TOP
-        ui.suggestions.requestLayout()
+        ui.toolbarBottom = prefs.getString(Prefs.TOOLBAR, "top") == "bottom"
     }
 
     // endregion

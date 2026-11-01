@@ -1,7 +1,12 @@
 package app.brisa.browser
 
+import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
+
+/** The app's one settings file. Same name AndroidX Preference used, so existing settings carry over. */
+fun Context.defaultPrefs(): SharedPreferences =
+    getSharedPreferences("${packageName}_preferences", Context.MODE_PRIVATE)
 
 object Prefs {
     const val JAVASCRIPT = "javascript"
@@ -32,6 +37,8 @@ object Prefs {
     const val TEXT_SIZE = "text_size"
     const val CONFIRM_DOWNLOADS = "confirm_downloads"
     const val DOWNLOAD_TREE = "download_tree"
+
+    const val ACCENT_DYNAMIC = "dynamic"
 
     const val CLEAR_HISTORY = "history"
     const val CLEAR_COOKIES = "cookies"

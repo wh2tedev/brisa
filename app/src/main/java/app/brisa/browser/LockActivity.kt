@@ -1,24 +1,77 @@
 package app.brisa.browser
 
 import android.os.Bundle
-import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.addCallback
-import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.fragment.app.FragmentActivity
 
 /** Opaque screen shown on top of Brisa until the phone's own authentication succeeds. */
-class LockActivity : AppCompatActivity() {
+class LockActivity : FragmentActivity() {
     private var prompting = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        Appearance.beforeCreate(this)
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        Appearance.apply(this)
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
-        setContentView(R.layout.activity_lock)
-        Appearance.finish(this)
-        findViewById<View>(R.id.unlockButton).setOnClickListener { prompt() }
+        setContent {
+            BrisaTheme {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background)
+                        .systemBarsPadding()
+                        .padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Box(
+                        Modifier
+                            .size(88.dp)
+                            .clip(CircleShape)
+                            .background(colorResource(R.color.launcher_bg)),
+                    ) {
+                        Image(
+                            painter = painterResource(R.drawable.ic_launcher_foreground),
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                    Spacer(Modifier.height(24.dp))
+                    Text(
+                        text = stringResource(R.string.lock_title),
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(24.dp))
+                    Button(onClick = { prompt() }) { Text(stringResource(R.string.lock_unlock)) }
+                }
+            }
+        }
         onBackPressedDispatcher.addCallback(this) { finishAffinity() }
     }
 

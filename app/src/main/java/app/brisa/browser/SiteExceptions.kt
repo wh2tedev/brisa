@@ -1,7 +1,6 @@
 package app.brisa.browser
 
 import android.content.Context
-import androidx.preference.PreferenceManager
 
 /** Sites where tracker blocking is switched off. A site also covers its subdomains. */
 object SiteExceptions {
@@ -11,7 +10,7 @@ object SiteExceptions {
     private var hosts: Set<String> = emptySet()
 
     fun init(context: Context) {
-        hosts = PreferenceManager.getDefaultSharedPreferences(context).getStringSet(KEY, emptySet())?.toSet().orEmpty()
+        hosts = context.defaultPrefs().getStringSet(KEY, emptySet())?.toSet().orEmpty()
     }
 
     fun all(): List<String> = hosts.sorted()
@@ -28,6 +27,6 @@ object SiteExceptions {
 
     private fun save(context: Context, newHosts: Set<String>) {
         hosts = newHosts.filter { it.isNotEmpty() }.toSet()
-        PreferenceManager.getDefaultSharedPreferences(context).edit().putStringSet(KEY, HashSet(hosts)).apply()
+        context.defaultPrefs().edit().putStringSet(KEY, HashSet(hosts)).apply()
     }
 }

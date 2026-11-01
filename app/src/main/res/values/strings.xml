@@ -193,4 +193,9 @@
     <string name="protection_off_site">Off for this site</string>
     <string name="pref_privacy_policy">Privacy policy</string>
     <string name="pref_privacy_policy_sum">What Brisa stores and what leaves your device</string>
+    <string name="not_set">Not set</string>
+    <string name="show_password">Show password</string>
+    <string name="hide_password">Hide password</string>
+    <string name="back_to_settings">Back</string>
+    <string name="text_size_value">%1$d%%</string>
 </resources>

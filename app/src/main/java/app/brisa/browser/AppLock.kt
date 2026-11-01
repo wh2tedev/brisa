@@ -12,7 +12,6 @@ import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
-import androidx.preference.PreferenceManager
 
 /**
  * App lock built on the phone's own authentication: fingerprint or face where available, otherwise (or as well)
@@ -30,7 +29,7 @@ object AppLock {
     /** True from the moment the lock screen is requested until it is closed. */
     var lockActive = false
 
-    private fun prefs(context: Context) = PreferenceManager.getDefaultSharedPreferences(context)
+    private fun prefs(context: Context) = context.defaultPrefs()
 
     fun enabled(context: Context) = prefs(context).getBoolean(Prefs.APP_LOCK, false)
 

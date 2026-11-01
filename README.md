@@ -1,6 +1,6 @@
 # Brisa
 
-A minimal Android browser built on `WebView`, with Material 3 and a Chrome-style dark theme.
+A minimal Android browser built on `WebView`, with a Jetpack Compose interface, Material 3 and Material You dynamic color (Android 12+).
 Google is the default search engine, and you can change it. No analytics, no accounts and no servers of its own: Brisa talks only to the sites you visit and the search engine you choose. See [PRIVACY.md](PRIVACY.md).
 
 ## Features
@@ -108,7 +108,7 @@ and attaches it to a GitHub Release with its SHA-256 and the signing certificate
 
 ## Credits and licenses
 
-Brisa is MIT licensed. It uses AndroidX, Material Components, the Kotlin standard library and Material Design icons
+Brisa is MIT licensed. It uses AndroidX, Jetpack Compose, Material 3, the Kotlin standard library and Material Design icons
 (all Apache-2.0); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the in-app list under
 Settings > About > Open-source licenses. Web pages are rendered by the system's Android System WebView (Chromium),
 which Brisa does not bundle.

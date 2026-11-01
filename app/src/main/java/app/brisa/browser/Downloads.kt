@@ -8,7 +8,6 @@ import android.os.Environment
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
-import androidx.preference.PreferenceManager
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -18,7 +17,7 @@ import java.io.OutputStream
 /** Where downloads are written: the public Downloads folder, or a folder the user picked. */
 object Storage {
     fun treeUri(context: Context): Uri? {
-        val raw = PreferenceManager.getDefaultSharedPreferences(context).getString(Prefs.DOWNLOAD_TREE, null) ?: return null
+        val raw = context.defaultPrefs().getString(Prefs.DOWNLOAD_TREE, null) ?: return null
         val uri = Uri.parse(raw)
         val ok = context.contentResolver.persistedUriPermissions.any { it.uri == uri && it.isWritePermission }
         return uri.takeIf { ok }

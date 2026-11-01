@@ -2,109 +2,102 @@ package app.brisa.browser
 
 import android.app.DownloadManager
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.text.format.DateUtils
 import android.text.format.Formatter
-import android.view.LayoutInflater
-import android.view.Menu
-import android.view.MenuItem
-import android.view.View
-import android.view.ViewGroup
-import android.view.animation.AnimationUtils
-import android.widget.ImageButton
-import android.widget.ImageView
-import android.widget.PopupMenu
-import android.widget.TextView
-import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.isGone
-import androidx.core.view.isVisible
-import androidx.recyclerview.widget.DiffUtil
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.ListAdapter
-import androidx.recyclerview.widget.RecyclerView
-import com.google.android.material.appbar.MaterialToolbar
-import com.google.android.material.progressindicator.LinearProgressIndicator
-import com.google.android.material.snackbar.Snackbar
+import androidx.activity.compose.setContent
+import androidx.annotation.StringRes
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 
-class DownloadsActivity : AppCompatActivity() {
+class DownloadsActivity : FragmentActivity() {
 
-    private val handler = Handler(Looper.getMainLooper())
     private val syncing = AtomicBoolean(false)
     private val folderPicker = FolderPicker(this)
-    private lateinit var adapter: DownloadAdapter
-    private lateinit var folderLabel: TextView
-    private lateinit var empty: View
-    private lateinit var list: RecyclerView
-    private var first = true
-
-    private val poll = object : Runnable {
-        override fun run() {
-            refresh()
-            handler.postDelayed(this, 700)
-        }
-    }
+    private var items by mutableStateOf<List<Downloads.Item>>(emptyList())
+    private var folder by mutableStateOf("")
+    private val snackbar = SnackbarHostState()
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        Appearance.beforeCreate(this)
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        Appearance.apply(this)
-        setContentView(R.layout.activity_downloads)
-        Appearance.finish(this)
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.downloadsRoot)) { view, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
-            WindowInsetsCompat.CONSUMED
+        items = Downloads.all(this)
+        folder = Storage.label(this)
+        setContent {
+            BrisaTheme {
+                DownloadsScreen()
+                folderPicker.Dialog()
+            }
         }
-        setSupportActionBar(findViewById<MaterialToolbar>(R.id.toolbar))
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        setTitle(R.string.downloads)
-
-        folderLabel = findViewById(R.id.folderLabel)
-        empty = findViewById(R.id.empty)
-        list = findViewById(R.id.list)
-        adapter = DownloadAdapter(::open, ::showMenu)
-        list.layoutManager = LinearLayoutManager(this)
-        list.adapter = adapter
-        list.layoutAnimation = AnimationUtils.loadLayoutAnimation(this, R.anim.layout_list_in)
-        findViewById<View>(R.id.folderCard).setOnClickListener { folderPicker.show { renderFolder() } }
-        renderFolder()
-    }
-
-    override fun onStart() {
-        super.onStart()
-        handler.post(poll)
-    }
-
-    override fun onStop() {
-        handler.removeCallbacks(poll)
-        super.onStop()
-    }
-
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menu.add(0, 1, 0, R.string.clear_list).setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
-        return true
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        if (item.itemId == 1) {
-            Downloads.clearList(this)
-            render()
-            Snackbar.make(list, R.string.list_cleared, Snackbar.LENGTH_SHORT).show()
-            return true
+        // Poll the system downloader only while the screen is visible.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (true) {
+                    refresh()
+                    delay(700)
+                }
+            }
         }
-        return super.onOptionsItemSelected(item)
-    }
-
-    override fun onSupportNavigateUp(): Boolean {
-        finish()
-        return true
     }
 
     @Suppress("DEPRECATION")
@@ -113,42 +106,26 @@ class DownloadsActivity : AppCompatActivity() {
         overridePendingTransition(R.anim.enter_from_left, R.anim.exit_to_right)
     }
 
-    private fun renderFolder() {
-        folderLabel.text = Storage.label(this)
-    }
-
-    private fun refresh() {
+    private suspend fun refresh() {
         if (!syncing.compareAndSet(false, true)) return
-        val app = applicationContext
-        Thread {
-            runCatching { Downloads.sync(app) }
-            handler.post {
-                syncing.set(false)
-                if (!isDestroyed) render()
-            }
-        }.start()
+        try {
+            val app = applicationContext
+            withContext(Dispatchers.IO) { runCatching { Downloads.sync(app) } }
+            if (!isDestroyed) items = Downloads.all(this)
+        } finally {
+            syncing.set(false)
+        }
     }
 
     private fun render() {
-        val items = Downloads.all(this)
-        val wasEmpty = adapter.itemCount == 0
-        adapter.submitList(items) {
-            if (first && items.isNotEmpty()) {
-                first = false
-                list.scheduleLayoutAnimation()
-            }
+        items = Downloads.all(this)
+    }
+
+    private fun message(@StringRes res: Int) {
+        lifecycleScope.launch {
+            snackbar.currentSnackbarData?.dismiss()
+            snackbar.showSnackbar(getString(res))
         }
-        if (items.isEmpty()) {
-            if (!empty.isVisible) {
-                empty.isVisible = true
-                empty.animate().alpha(1f).setDuration(Motion.MEDIUM).setInterpolator(Motion.decelerate).start()
-            }
-        } else if (empty.isVisible) {
-            empty.animate().cancel()
-            empty.alpha = 0f
-            empty.isGone = true
-        }
-        if (wasEmpty && items.isEmpty()) first = true
     }
 
     private fun open(item: Downloads.Item) {
@@ -160,9 +137,9 @@ class DownloadsActivity : AppCompatActivity() {
         try {
             startActivity(intent)
         } catch (e: ActivityNotFoundException) {
-            Snackbar.make(list, R.string.cant_open, Snackbar.LENGTH_SHORT).show()
+            message(R.string.cant_open)
         } catch (e: SecurityException) {
-            Snackbar.make(list, R.string.cant_open, Snackbar.LENGTH_SHORT).show()
+            message(R.string.cant_open)
         }
     }
 
@@ -173,96 +150,259 @@ class DownloadsActivity : AppCompatActivity() {
         startActivity(Intent.createChooser(send, null))
     }
 
-    private fun showMenu(anchor: View, item: Downloads.Item) {
-        val menu = PopupMenu(this, anchor)
-        if (item.status == Downloads.DONE) {
-            menu.menu.add(0, 1, 0, R.string.open_file)
-            menu.menu.add(0, 2, 1, R.string.share)
-        }
-        if (item.active) menu.menu.add(0, 3, 2, R.string.cancel_download)
-        else menu.menu.add(0, 4, 2, R.string.remove_from_list)
-        if (item.status == Downloads.DONE) menu.menu.add(0, 5, 3, R.string.delete_file)
-        menu.setOnMenuItemClickListener {
-            when (it.itemId) {
-                1 -> open(item)
-                2 -> share(item)
-                3 -> cancel(item)
-                4 -> Downloads.remove(this, item.id).also { render() }
-                5 -> delete(item)
-            }
-            true
-        }
-        menu.show()
-    }
-
     private fun cancel(item: Downloads.Item) {
         val app = applicationContext
-        Thread {
-            runCatching { app.getSystemService(DownloadManager::class.java).remove(item.dmId) }
-            Downloads.remove(app, item.id)
-            handler.post { if (!isDestroyed) render() }
-        }.start()
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching { app.getSystemService(DownloadManager::class.java).remove(item.dmId) }
+                Downloads.remove(app, item.id)
+            }
+            if (!isDestroyed) render()
+        }
     }
 
     private fun delete(item: Downloads.Item) {
         val app = applicationContext
-        Thread {
-            Storage.deleteFile(app, item)
-            Downloads.remove(app, item.id)
-            handler.post { if (!isDestroyed) render() }
-        }.start()
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                Storage.deleteFile(app, item)
+                Downloads.remove(app, item.id)
+            }
+            if (!isDestroyed) render()
+        }
     }
 
-    private class DownloadAdapter(
-        val onOpen: (Downloads.Item) -> Unit,
-        val onMore: (View, Downloads.Item) -> Unit,
-    ) : ListAdapter<Downloads.Item, DownloadAdapter.Holder>(object : DiffUtil.ItemCallback<Downloads.Item>() {
-        override fun areItemsTheSame(a: Downloads.Item, b: Downloads.Item) = a.id == b.id
-        override fun areContentsTheSame(a: Downloads.Item, b: Downloads.Item) = a == b
-    }) {
-        class Holder(view: View) : RecyclerView.ViewHolder(view) {
-            val icon: ImageView = view.findViewById(R.id.dlIcon)
-            val name: TextView = view.findViewById(R.id.dlName)
-            val status: TextView = view.findViewById(R.id.dlStatus)
-            val progress: LinearProgressIndicator = view.findViewById(R.id.dlProgress)
-            val more: ImageButton = view.findViewById(R.id.dlMore)
-        }
-
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
-            Holder(LayoutInflater.from(parent.context).inflate(R.layout.item_download, parent, false))
-
-        override fun onBindViewHolder(h: Holder, position: Int) {
-            val item = getItem(position)
-            val ctx = h.itemView.context
-            h.name.text = item.name
-            h.itemView.setOnClickListener { onOpen(item) }
-            h.more.setOnClickListener { onMore(it, item) }
-            h.more.pressable()
-            h.status.text = when (item.status) {
-                Downloads.DONE -> {
-                    val size = if (item.size > 0) Formatter.formatShortFileSize(ctx, item.size) else ""
-                    val age = DateUtils.getRelativeTimeSpanString(item.time, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS)
-                    listOf(size, age.toString()).filter { it.isNotEmpty() }.joinToString(" · ")
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    private fun DownloadsScreen() {
+        val scheme = MaterialTheme.colorScheme
+        var menuOpen by remember { mutableStateOf(false) }
+        Scaffold(
+            containerColor = scheme.surface,
+            topBar = {
+                TopAppBar(
+                    title = { Text(stringResource(R.string.downloads)) },
+                    navigationIcon = {
+                        IconButton(onClick = { finish() }) {
+                            Icon(painterResource(R.drawable.ic_arrow_back), contentDescription = stringResource(R.string.back))
+                        }
+                    },
+                    actions = {
+                        Box {
+                            IconButton(onClick = { menuOpen = true }) {
+                                Icon(painterResource(R.drawable.ic_more_vert), contentDescription = stringResource(R.string.more))
+                            }
+                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.clear_list)) },
+                                    onClick = {
+                                        menuOpen = false
+                                        Downloads.clearList(this@DownloadsActivity)
+                                        render()
+                                        message(R.string.list_cleared)
+                                    },
+                                )
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = scheme.surfaceContainer),
+                )
+            },
+            snackbarHost = { SnackbarHost(snackbar) },
+        ) { padding ->
+            Box(Modifier.fillMaxSize().padding(padding)) {
+                Column(Modifier.fillMaxSize()) {
+                    FolderCard()
+                    LazyColumn(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        contentPadding = PaddingValues(bottom = 16.dp),
+                    ) {
+                        items(items, key = { it.id }) { item ->
+                            DownloadRow(item, Modifier.animateItem())
+                        }
+                    }
                 }
-                Downloads.FAILED -> ctx.getString(R.string.status_failed)
-                Downloads.MOVING -> ctx.getString(R.string.status_finishing)
-                else -> if (item.size > 0) ctx.getString(
-                    R.string.status_progress,
-                    Formatter.formatShortFileSize(ctx, item.done),
-                    Formatter.formatShortFileSize(ctx, item.size),
-                ) else ctx.getString(R.string.downloading)
-            }
-            h.status.setTextColor(ctx.themeColor(if (item.status == Downloads.FAILED) R.attr.brisaWarning else R.attr.brisaMuted))
-            val running = item.status == Downloads.RUNNING
-            h.progress.isVisible = running || item.status == Downloads.MOVING
-            if (h.progress.isVisible) {
-                if (running && item.size > 0) {
-                    h.progress.isIndeterminate = false
-                    h.progress.setProgressCompat((item.done * 100 / item.size).toInt(), true)
-                } else {
-                    h.progress.isIndeterminate = true
+                AnimatedVisibility(
+                    visible = items.isEmpty(),
+                    modifier = Modifier.align(Alignment.Center),
+                    enter = fadeIn(tween(Motion.MEDIUM, easing = Motion.decelerate)),
+                    exit = fadeOut(tween(Motion.SHORT)),
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        IconTile(R.drawable.ic_download, size = 72, iconPadding = 20, tint = scheme.onSurfaceVariant)
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            stringResource(R.string.empty_downloads),
+                            color = scheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
                 }
             }
         }
+    }
+
+    @Composable
+    private fun FolderCard() {
+        val scheme = MaterialTheme.colorScheme
+        Row(
+            modifier = Modifier
+                .padding(14.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(scheme.surfaceContainer)
+                .clickable { folderPicker.show { folder = Storage.label(this@DownloadsActivity) } }
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconTile(R.drawable.ic_folder, size = 40, iconPadding = 8, tint = scheme.primary)
+            Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
+                Text(
+                    stringResource(R.string.save_to),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = scheme.onSurfaceVariant,
+                )
+                Text(
+                    folder,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = scheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                stringResource(R.string.change),
+                style = MaterialTheme.typography.labelLarge,
+                color = scheme.primary,
+            )
+        }
+    }
+
+    @Composable
+    private fun DownloadRow(item: Downloads.Item, modifier: Modifier = Modifier) {
+        val scheme = MaterialTheme.colorScheme
+        val context = LocalContext.current
+        var menuOpen by remember { mutableStateOf(false) }
+        ListItem(
+            modifier = modifier.clickable { open(item) },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            leadingContent = { IconTile(R.drawable.ic_file, size = 44, iconPadding = 10, tint = scheme.primary) },
+            headlineContent = {
+                Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            },
+            supportingContent = {
+                Column {
+                    Text(
+                        statusText(context, item),
+                        color = if (item.status == Downloads.FAILED) scheme.error else scheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val running = item.status == Downloads.RUNNING
+                    if (running || item.status == Downloads.MOVING) {
+                        Spacer(Modifier.height(8.dp))
+                        if (running && item.size > 0) {
+                            val target = (item.done.toFloat() / item.size.toFloat()).coerceIn(0f, 1f)
+                            val shown by animateFloatAsState(target, label = "downloadProgress")
+                            LinearProgressIndicator(
+                                progress = { shown },
+                                modifier = Modifier.fillMaxWidth(),
+                                trackColor = scheme.surfaceContainerHighest,
+                            )
+                        } else {
+                            LinearProgressIndicator(
+                                modifier = Modifier.fillMaxWidth(),
+                                trackColor = scheme.surfaceContainerHighest,
+                            )
+                        }
+                    }
+                }
+            },
+            trailingContent = {
+                Box {
+                    PressableIconButton(onClick = { menuOpen = true }) {
+                        Icon(painterResource(R.drawable.ic_more_vert), contentDescription = stringResource(R.string.more))
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        if (item.status == Downloads.DONE) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.open_file)) },
+                                onClick = {
+                                    menuOpen = false
+                                    open(item)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.share)) },
+                                onClick = {
+                                    menuOpen = false
+                                    share(item)
+                                },
+                            )
+                        }
+                        if (item.active) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.cancel_download)) },
+                                onClick = {
+                                    menuOpen = false
+                                    cancel(item)
+                                },
+                            )
+                        } else {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.remove_from_list)) },
+                                onClick = {
+                                    menuOpen = false
+                                    Downloads.remove(this@DownloadsActivity, item.id)
+                                    render()
+                                },
+                            )
+                        }
+                        if (item.status == Downloads.DONE) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.delete_file)) },
+                                onClick = {
+                                    menuOpen = false
+                                    delete(item)
+                                },
+                            )
+                        }
+                    }
+                }
+            },
+        )
+    }
+
+    private fun statusText(context: Context, item: Downloads.Item): String = when (item.status) {
+        Downloads.DONE -> {
+            val size = if (item.size > 0) Formatter.formatShortFileSize(context, item.size) else ""
+            val age = DateUtils.getRelativeTimeSpanString(item.time, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS)
+            listOf(size, age.toString()).filter { it.isNotEmpty() }.joinToString(" · ")
+        }
+        Downloads.FAILED -> context.getString(R.string.status_failed)
+        Downloads.MOVING -> context.getString(R.string.status_finishing)
+        else -> if (item.size > 0) {
+            context.getString(
+                R.string.status_progress,
+                Formatter.formatShortFileSize(context, item.done),
+                Formatter.formatShortFileSize(context, item.size),
+            )
+        } else {
+            context.getString(R.string.downloading)
+        }
+    }
+}
+
+/** A rounded square holding an icon, used where the old layouts used `bg_icon_tile`. */
+@Composable
+fun IconTile(res: Int, size: Int, iconPadding: Int, tint: Color) {
+    Box(
+        modifier = Modifier
+            .size(size.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .padding(iconPadding.dp),
+    ) {
+        Icon(painterResource(res), contentDescription = null, tint = tint, modifier = Modifier.fillMaxSize())
     }
 }
