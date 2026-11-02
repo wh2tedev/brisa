@@ -61,11 +61,11 @@ Cleartext traffic is allowed so that `localhost`, LAN addresses and dev servers 
 - Third-party requests to known ad and tracking domains are blocked (`app/src/main/assets/blocklist.txt`).
 - Downloads ask for confirmation by default. `blob:` downloads use a one-time token and are capped at 25 MB.
 - `DNT` and `Sec-GPC` headers on top-level navigation (configurable).
-- Web permissions (camera, microphone, location) are always denied.
+- Camera, microphone and location are asked for only when a site requests them. You choose Allow or Deny, and can remember the choice per site in Settings. Nothing is shared without that answer.
 - Non-web schemes (`intent:`, `file:`, `javascript:`, …) are blocked during navigation.
 - History stays on the device, can be turned off in Settings, and is erased by *Clear browsing data*. Address bar suggestions are computed locally; nothing is sent to Google until you submit a search. Backups are disabled.
 - Clear data on exit, or on demand.
-- Brisa asks for internet access. Libraries it uses add a few more (background downloads, screen-lock authentication). The build fails if camera, microphone, location, contacts, SMS, phone or storage permissions appear, and each release publishes its permission list.
+- Brisa asks for internet access, plus camera, microphone and location, which are only used when a website requests them and you agree. Libraries add a few more (background downloads, screen-lock authentication). The build fails if contacts, SMS, phone, calendar, Bluetooth, sensor or storage permissions appear, and each release publishes its permission list.
 
 ## Release builds
 

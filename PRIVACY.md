@@ -29,11 +29,11 @@ Brisa disables Android backups, so this data is not copied to cloud backups by t
 - No analytics, crash reports, advertising or tracking of any kind inside the app.
 - No accounts, no sign-in and no sync.
 - No selling or sharing of data. Brisa has no data to share.
-- Websites that ask for your camera, microphone or location are always refused.
+- Websites can use your camera, microphone or location only if you allow it each time or remember it for that site. Otherwise they are refused.
 
 ## Permissions
 
-Brisa asks for internet access. Some libraries it uses add a few more, for example to finish downloads in the background and to use screen-lock authentication. Brisa does not request camera, microphone, location, contacts, SMS, phone or storage permissions, and the build fails if one of them appears. The full list is published with every release.
+Brisa asks for internet access. It also declares camera, microphone and location access, so that a website can use them if you allow it. Android asks you at the moment a site requests one, and Brisa asks you again before sharing it with the site, and can remember your answer for that site only. Brisa never uses them on its own, and nothing is recorded or sent anywhere by Brisa. Some libraries add a few more permissions, for example to finish downloads in the background and to use screen-lock authentication. Brisa does not request contacts, SMS, phone, calendar, Bluetooth, sensor or storage permissions, and the build fails if one of them appears. The full list is published with every release.
 
 ## Your choices and deleting data
 

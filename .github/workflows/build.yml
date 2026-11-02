@@ -22,7 +22,10 @@ jobs:
         run: |
           APK=app/build/outputs/apk/release/app-release-unsigned.apk
           "$ANDROID_HOME/build-tools/37.0.0/aapt2" dump permissions "$APK" | tee permissions.txt
-          if grep -Eq "CAMERA|RECORD_AUDIO|LOCATION|CONTACTS|SMS|PHONE_STATE|CALL_|EXTERNAL_STORAGE|READ_MEDIA|CALENDAR|BLUETOOTH|BODY_SENSORS" permissions.txt; then
+          # Camera, microphone and location are allowed: Brisa only asks for them when a site requests
+          # them and the person agrees (see PRIVACY.md). Anything else sensitive fails the build.
+          ALLOWED="android.permission.(CAMERA|RECORD_AUDIO|ACCESS_FINE_LOCATION|ACCESS_COARSE_LOCATION)'"
+          if grep -E "CAMERA|RECORD_AUDIO|LOCATION|CONTACTS|SMS|PHONE_STATE|CALL_|EXTERNAL_STORAGE|READ_MEDIA|CALENDAR|BLUETOOTH|BODY_SENSORS" permissions.txt | grep -Evq "$ALLOWED"; then
             echo "A sensitive permission appeared. Update PRIVACY.md and the README before allowing it."
             exit 1
           fi
