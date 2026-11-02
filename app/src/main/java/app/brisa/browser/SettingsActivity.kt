@@ -245,6 +245,7 @@ class SettingsActivity : FragmentActivity() {
             )
         }
         PrefCategory(R.string.cat_pages) {
+            SwitchPreference(prefs, Prefs.HIDE_BAR_SCROLL, true, R.string.pref_hide_bar, R.string.pref_hide_bar_sum)
             SwitchPreference(prefs, Prefs.WEB_DARK, false, R.string.pref_web_dark, R.string.pref_web_dark_sum)
         }
     }
@@ -272,6 +273,8 @@ class SettingsActivity : FragmentActivity() {
         var showLockSetup by remember { mutableStateOf(false) }
         var showExceptions by remember { mutableStateOf(false) }
         var showClear by remember { mutableStateOf(false) }
+        var showPermissions by remember { mutableStateOf(false) }
+        var showLocked by remember { mutableStateOf(false) }
 
         PrefCategory(R.string.cat_access) {
             SwitchRow(
@@ -305,6 +308,16 @@ class SettingsActivity : FragmentActivity() {
                     }
                 },
             )
+            PrefRow(
+                title = stringResource(R.string.pref_site_permissions),
+                summary = stringResource(R.string.pref_site_permissions_sum),
+                onClick = { showPermissions = true },
+            )
+            PrefRow(
+                title = stringResource(R.string.pref_locked_sites),
+                summary = stringResource(R.string.pref_locked_sites_sum),
+                onClick = { showLocked = true },
+            )
             SwitchPreference(prefs, Prefs.HTTPS_FIRST, true, R.string.pref_https_first, R.string.pref_https_first_sum)
             SwitchPreference(prefs, Prefs.BLOCK_THIRD_PARTY, true, R.string.pref_third_party, R.string.pref_third_party_sum)
             SwitchPreference(prefs, Prefs.SEND_DNT, true, R.string.pref_dnt, R.string.pref_dnt_sum)
@@ -333,6 +346,8 @@ class SettingsActivity : FragmentActivity() {
             )
         }
         if (showClear) ClearDataDialog { showClear = false }
+        if (showPermissions) SitePermissionsDialog { showPermissions = false }
+        if (showLocked) LockedSitesDialog { showLocked = false }
     }
 
     @Composable
@@ -579,6 +594,86 @@ class SettingsActivity : FragmentActivity() {
         val text = input.trim()
         if (text.isEmpty()) return null
         return Uri.parse(if ("://" in text) text else "https://$text").host
+    }
+
+    @Composable
+    private fun SitePermissionsDialog(onDismiss: () -> Unit) {
+        val activity = this@SettingsActivity
+        var saved by remember { mutableStateOf(SitePermissions.all(activity)) }
+        BrisaDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(stringResource(R.string.pref_site_permissions)) },
+            text = {
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                    if (saved.isEmpty()) Text(stringResource(R.string.site_permissions_empty))
+                    saved.forEach { (host, kind, allowed) ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(host)
+                                Text(
+                                    permissionLabel(kind) + ": " +
+                                        stringResource(if (allowed) R.string.perm_allowed else R.string.perm_blocked),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            IconButton(onClick = {
+                                SitePermissions.set(activity, host, kind, null)
+                                saved = SitePermissions.all(activity)
+                            }) {
+                                Icon(painterResource(R.drawable.ic_close), contentDescription = stringResource(R.string.site_folders_remove))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.ok)) } },
+        )
+    }
+
+    @Composable
+    private fun permissionLabel(kind: String): String = stringResource(
+        when (kind) {
+            SitePermissions.CAMERA -> R.string.perm_camera
+            SitePermissions.MICROPHONE -> R.string.perm_microphone
+            SitePermissions.LOCATION -> R.string.perm_location
+            else -> R.string.perm_midi
+        },
+    ).replaceFirstChar { it.uppercase() }
+
+    @Composable
+    private fun LockedSitesDialog(onDismiss: () -> Unit) {
+        val activity = this@SettingsActivity
+        var sites by remember { mutableStateOf(LockedSites.all(activity)) }
+        BrisaDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(stringResource(R.string.pref_locked_sites)) },
+            text = {
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                    if (sites.isEmpty()) Text(stringResource(R.string.locked_sites_empty))
+                    sites.forEach { host ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(host, Modifier.weight(1f))
+                            IconButton(onClick = {
+                                // Unlocking a site needs the phone's lock, like unlocking its page does.
+                                val remove = {
+                                    LockedSites.remove(activity, host)
+                                    sites = LockedSites.all(activity)
+                                }
+                                if (AppLock.availability(activity) == AppLock.Availability.READY) {
+                                    AppLock.authenticate(activity, getString(R.string.lock_confirm_title), onSuccess = { remove() })
+                                } else {
+                                    remove()
+                                }
+                            }) {
+                                Icon(painterResource(R.drawable.ic_close), contentDescription = stringResource(R.string.site_folders_remove))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.ok)) } },
+        )
     }
 
     @Composable

@@ -1,5 +1,6 @@
 package app.brisa.browser
 
+import android.Manifest
 import android.app.ActivityOptions
 import android.app.DownloadManager
 import android.content.ActivityNotFoundException
@@ -7,6 +8,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
 import android.net.http.SslError
@@ -16,12 +18,14 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
+import android.os.SystemClock
 import android.text.TextUtils
 import android.text.format.DateUtils
 import android.text.format.Formatter
 import android.util.Base64
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
 import android.webkit.HttpAuthHandler
@@ -46,12 +50,16 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarResult
+import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
+import androidx.webkit.ProfileStore
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
@@ -64,7 +72,7 @@ private val tabIds = AtomicLong()
 
 class MainActivity : FragmentActivity(), BrowserHost {
 
-    private class Tab(val web: WebView) {
+    private class Tab(val web: WebView, val isPrivate: Boolean = false) {
         val id = tabIds.incrementAndGet()
         var title = ""
         var loading = false
@@ -76,6 +84,10 @@ class MainActivity : FragmentActivity(), BrowserHost {
         var opener: Tab? = null
         var errorUrl: String? = null
         var sslBlocked = false
+
+        /** Locked tabs and sites ask for the phone's lock again after the person leaves them. */
+        var unlocked = false
+        var userLocked = false
 
         /** Read from the network thread, so kept volatile. */
         @Volatile
@@ -111,6 +123,17 @@ class MainActivity : FragmentActivity(), BrowserHost {
 
     private val folderPicker = FolderPicker(this)
 
+    private var permissionCallback: ((Map<String, Boolean>) -> Unit)? = null
+    private var activePermission: PermissionRequest? = null
+    private val permissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            val callback = permissionCallback
+            permissionCallback = null
+            callback?.invoke(result)
+        }
+    private var scrollAcc = 0
+    private var lastBarToggle = 0L
+
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var customCallback: WebChromeClient.CustomViewCallback? = null
 
@@ -130,6 +153,7 @@ class MainActivity : FragmentActivity(), BrowserHost {
         super.onCreate(savedInstanceState)
         prefs = defaultPrefs()
         applyToolbarPosition()
+        if (!prefs.getBoolean(Prefs.HIDE_BAR_SCROLL, true)) ui.barVisible = true
         ui.pullEnabled = prefs.getBoolean(Prefs.PULL_REFRESH, true)
 
         // Added before the content so Compose's own back handlers (find bar, address bar, fullscreen) take priority.
@@ -141,6 +165,7 @@ class MainActivity : FragmentActivity(), BrowserHost {
             }
         }
 
+        dropPrivateProfile()
         Blocklist.load(this)
         SiteExceptions.init(this)
         val external = externalUrl(intent)
@@ -160,7 +185,9 @@ class MainActivity : FragmentActivity(), BrowserHost {
         tabs.forEach(::applySettings)
         applyToolbarPosition()
         ui.pullEnabled = prefs.getBoolean(Prefs.PULL_REFRESH, true)
-        applyPreviewSetting()
+        applyScreenFlags()
+        refreshLock()
+        syncTabs()
         checkEngineAge()
         val pending = prefs.getStringSet(Prefs.PENDING_CLEAR, null)
         if (!pending.isNullOrEmpty()) {
@@ -176,33 +203,54 @@ class MainActivity : FragmentActivity(), BrowserHost {
         super.onPause()
     }
 
+    override fun onStop() {
+        // Locked tabs and sites ask again when the person comes back.
+        tabs.forEach { it.unlocked = false }
+        refreshLock()
+        super.onStop()
+    }
+
     override fun onDestroy() {
         if (isFinishing && prefs.getBoolean(Prefs.CLEAR_ON_EXIT, false)) {
             clearData(setOf(Prefs.CLEAR_HISTORY, Prefs.CLEAR_COOKIES, Prefs.CLEAR_CACHE))
         }
         tabs.toList().forEach(::destroy)
         tabs.clear()
+        dropPrivateProfile()
         super.onDestroy()
     }
 
     // region tabs
 
-    private fun createTab(): Tab {
-        val tab = Tab(WebView(this).apply {
+    private fun createTab(incognito: Boolean = false): Tab {
+        val web = WebView(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
             )
-        })
+        }
+        // A separate WebView profile keeps private cookies and storage away from normal tabs.
+        if (incognito && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
+            runCatching { WebViewCompat.setProfile(web, PRIVATE_PROFILE) }
+        }
+        val tab = Tab(web, incognito)
         configure(tab)
         tabs += tab
         return tab
     }
 
-    private fun newTab(url: String) {
-        val tab = createTab()
+    private fun newTab(url: String) = openNewTab(url, incognito = false)
+
+    private fun openNewTab(url: String, incognito: Boolean) {
+        val tab = createTab(incognito)
         select(tab)
         open(url, tab)
+    }
+
+    /** Deletes the private profile's data. Only possible once no private tab is using it. */
+    private fun dropPrivateProfile() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) return
+        runCatching { ProfileStore.getInstance().deleteProfile(PRIVATE_PROFILE) }
     }
 
     /** Recreates saved tabs without loading them; a tab loads when it is first selected. */
@@ -224,16 +272,28 @@ class MainActivity : FragmentActivity(), BrowserHost {
             Session.clear(this)
             return
         }
-        Session.save(this, tabs.map { Session.Entry(titleOf(it), urlOf(it) ?: home()) }, tabs.indexOf(current))
+        // Private tabs are never written to disk.
+        val normal = tabs.filter { !it.isPrivate }
+        if (normal.isEmpty()) {
+            Session.clear(this)
+            return
+        }
+        Session.save(this, normal.map { Session.Entry(titleOf(it), urlOf(it) ?: home()) }, normal.indexOf(current).coerceAtLeast(0))
     }
 
     private fun select(tab: Tab) {
         exitFullscreen()
         closeFind()
+        if (::current.isInitialized) current.unlocked = false
         current = tab
         webContainer.removeAllViews()
         webContainer.addView(tab.web)
         ui.selectNonce++
+        ui.currentPrivate = tab.isPrivate
+        ui.barVisible = true
+        refreshLock()
+        // Private tabs also stay out of screenshots and the recents list.
+        applyScreenFlags()
         showUrl(urlOf(tab))
         ui.progress = tab.progress
         renderLoading()
@@ -251,6 +311,7 @@ class MainActivity : FragmentActivity(), BrowserHost {
         if (tabs.isEmpty()) newTab(home())
         else if (tab === current) select(tab.opener?.takeIf { it in tabs } ?: tabs[minOf(index, tabs.lastIndex)])
         destroy(tab)
+        if (tab.isPrivate && tabs.none { it.isPrivate }) dropPrivateProfile()
         syncTabs()
     }
 
@@ -271,7 +332,14 @@ class MainActivity : FragmentActivity(), BrowserHost {
     private fun syncTabs() {
         if (!::current.isInitialized) return
         ui.tabEntries = tabs.map {
-            TabEntry(it.id, titleOf(it), displayUrl(urlOf(it)), it.favicon, it === current)
+            val hidden = it !== current && needsUnlock(it)
+            val title = if (hidden) getString(R.string.tab_locked) else titleOf(it)
+            val subtitle = when {
+                it.isPrivate -> getString(R.string.private_tab)
+                hidden -> ""
+                else -> displayUrl(urlOf(it))
+            }
+            TabEntry(it.id, title, subtitle, if (hidden) null else it.favicon, it === current, it.isPrivate)
         }
     }
 
@@ -306,81 +374,49 @@ class MainActivity : FragmentActivity(), BrowserHost {
         val site = Uri.parse(source.url.orEmpty()).host
         when {
             url.startsWith("https://") || url.startsWith("http://") ->
-                confirmDownload(name, length, site) { enqueue(url, userAgent, mime, name, site) }
+                confirmDownload(name, length, site) { chosen -> enqueue(url, userAgent, mime, chosen, site) }
             url.startsWith("data:") -> {
                 val decoded = decodeDataUrl(url) ?: return notify(R.string.download_failed)
-                confirmDownload(name, decoded.second.size.toLong(), site) { saveBytes(name, decoded.first, decoded.second, site) }
+                confirmDownload(name, decoded.second.size.toLong(), site) { chosen -> saveBytes(chosen, decoded.first, decoded.second, site) }
             }
-            url.startsWith("blob:") -> confirmDownload(name, length, site) {
+            url.startsWith("blob:") -> confirmDownload(name, length, site) { chosen ->
                 val token = UUID.randomUUID().toString()
                 blobToken = token
-                blobName = name
+                blobName = chosen
                 blobHost = site
                 source.evaluateJavascript(blobScript(url, token), null)
             }
         }
     }
 
-    private fun confirmDownload(name: String, size: Long, site: String?, onConfirm: () -> Unit) {
+    private fun confirmDownload(name: String, size: Long, site: String?, onConfirm: (String) -> Unit) {
         val risky = name.substringAfterLast('.', "").lowercase() in RISKY_EXTENSIONS
         if (!risky && !prefs.getBoolean(Prefs.CONFIRM_DOWNLOADS, true)) {
-            onConfirm()
+            onConfirm(name)
             return
         }
         val detail = if (size > 0) Formatter.formatShortFileSize(this, size) else getString(R.string.unknown_size)
-        val message = "$name\n$detail\n\n${getString(R.string.save_to)}: ${Storage.label(this, site)}" +
+        val message = "$detail\n\n${getString(R.string.save_to)}: ${Storage.label(this, site)}" +
             if (risky) "\n\n" + getString(R.string.download_risky) else ""
         ui.prompt = Prompt.Download(
+            name = name,
             message = message,
-            onConfirm = onConfirm,
-            onChangeFolder = { folderPicker.show(site) { confirmDownload(name, size, site, onConfirm) } },
+            onConfirm = { typed -> onConfirm(cleanFileName(typed, name)) },
+            onChangeFolder = { typed -> folderPicker.show(site) { confirmDownload(typed, size, site, onConfirm) } },
         )
     }
 
-    /** The system downloader fails when the target file exists, so repeat downloads get a numbered name. */
-    private fun uniqueName(suggested: String): String {
-        val used = Downloads.all(this).map { it.name }.toSet()
-        if (suggested !in used) return suggested
-        val dot = suggested.lastIndexOf('.')
-        val base = if (dot > 0) suggested.substring(0, dot) else suggested
-        val ext = if (dot > 0) suggested.substring(dot) else ""
-        var n = 1
-        while ("$base ($n)$ext" in used) n++
-        return "$base ($n)$ext"
+    /** The person may type anything, so path separators are removed before it becomes a file name. */
+    private fun cleanFileName(input: String, fallback: String): String {
+        val cleaned = input.trim().replace('/', '_').replace('\\', '_').take(200)
+        return if (cleaned.isBlank() || cleaned == "." || cleaned == "..") fallback else cleaned
     }
 
     /** Hands an http(s) download to the system downloader and records it in the Downloads list. */
     private fun enqueue(url: String, userAgent: String, mime: String?, suggested: String, site: String?) {
-        val name = uniqueName(suggested)
-        val id = UUID.randomUUID().toString()
-        val tree = Storage.treeUri(this, site)
-        val base = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-        val request = DownloadManager.Request(Uri.parse(url))
-            .setTitle(name)
-            .setMimeType(mime)
-            .addRequestHeader("User-Agent", userAgent)
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-        // A custom folder cannot be written by the system downloader: it saves to a private
-        // temporary file first and DownloadReceiver moves it when it finishes.
-        var temp: String? = null
-        if (tree != null && base != null) {
-            temp = File(base, "brisa/$id/$name").absolutePath
-            request.setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, "brisa/$id/$name")
-        } else {
-            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
-        }
-        CookieManager.getInstance().getCookie(url)?.let { request.addRequestHeader("Cookie", it) }
-        val dmId = runCatching { getSystemService(DownloadManager::class.java).enqueue(request) }.getOrNull()
-            ?: return notify(R.string.download_failed)
-        Downloads.add(
-            this,
-            Downloads.Item(
-                id, dmId, name, url, mime?.takeIf { it.isNotBlank() } ?: "application/octet-stream",
-                -1, 0, System.currentTimeMillis(), Downloads.RUNNING, null,
-                if (temp != null) tree.toString() else null, temp,
-            ),
-        )
-        notify(getString(R.string.downloading), R.string.view) { openDownloads() }
+        val started = DownloadStarter.enqueue(this, url, userAgent, mime, suggested, Storage.treeUri(this, site))
+        if (started) notify(getString(R.string.downloading), R.string.view) { openDownloads() }
+        else notify(R.string.download_failed)
     }
 
     /** Saves bytes we already have (data: and blob: downloads) off the main thread. */
@@ -485,6 +521,7 @@ class MainActivity : FragmentActivity(), BrowserHost {
     // region history
 
     private fun recordVisit(tab: Tab, url: String?) {
+        if (tab.isPrivate) return
         if (url != null && url == tab.errorUrl) return
         if (url == null || !prefs.getBoolean(Prefs.SAVE_HISTORY, true)) return
         History.record(this, tab.title.ifBlank { url }, url)
@@ -504,7 +541,7 @@ class MainActivity : FragmentActivity(), BrowserHost {
             builtInZoomControls = true
             displayZoomControls = false
             setSupportMultipleWindows(true)
-            setGeolocationEnabled(false)
+            setGeolocationEnabled(true)
             setSafeBrowsingEnabled(true)
         }
         applySettings(tab)
@@ -543,7 +580,11 @@ class MainActivity : FragmentActivity(), BrowserHost {
                 tab.title = ""
                 tab.favicon = null
                 setLoading(tab, true)
-                if (tab === current) showUrl(url)
+                if (tab === current) {
+                    showUrl(url)
+                    ui.barVisible = true
+                    refreshLock()
+                }
                 syncTabs()
             }
 
@@ -593,7 +634,7 @@ class MainActivity : FragmentActivity(), BrowserHost {
                     notify(R.string.popup_blocked)
                     return false
                 }
-                val popup = createTab()
+                val popup = createTab(tab.isPrivate)
                 popup.opener = tab
                 select(popup)
                 (resultMsg.obj as WebView.WebViewTransport).webView = popup.web
@@ -652,12 +693,19 @@ class MainActivity : FragmentActivity(), BrowserHost {
 
             override fun onHideCustomView() = exitFullscreen()
 
-            override fun onPermissionRequest(request: PermissionRequest) = request.deny()
+            override fun onPermissionRequest(request: PermissionRequest) = handleWebPermission(request)
+
+            override fun onPermissionRequestCanceled(request: PermissionRequest) {
+                if (activePermission === request) {
+                    activePermission = null
+                    if (ui.prompt is Prompt.Permission) ui.prompt = null
+                }
+            }
 
             override fun onGeolocationPermissionsShowPrompt(
                 origin: String,
                 callback: GeolocationPermissions.Callback,
-            ) = callback.invoke(origin, false, false)
+            ) = handleLocation(origin, callback)
         }
 
         tab.web.setOnLongClickListener { showContextMenu(tab) }
@@ -666,6 +714,8 @@ class MainActivity : FragmentActivity(), BrowserHost {
                 ui.findCount = if (matches == 0) "0/0" else "${active + 1}/$matches"
             }
         }
+
+        tab.web.setOnScrollChangeListener { _, _, y, _, oldY -> onPageScroll(tab, y, oldY) }
 
         tab.web.addJavascriptInterface(blobBridge, "BrisaBlob")
         tab.web.setDownloadListener { url, userAgent, disposition, mime, length ->
@@ -910,6 +960,9 @@ class MainActivity : FragmentActivity(), BrowserHost {
             showProtection = level != "off" && siteHost != null,
             protectionOn = !SiteExceptions.isAllowed(siteHost),
             blocked = current.blocked.get(),
+            tabLocked = current.userLocked,
+            siteLocked = LockedSites.isLocked(this, siteHost),
+            siteLockable = siteHost != null,
         )
     }
 
@@ -965,6 +1018,190 @@ class MainActivity : FragmentActivity(), BrowserHost {
         ui.findQuery = ""
         ui.findCount = ""
         ui.findVisible = false
+    }
+
+    override fun newPrivateTab() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) notify(R.string.private_shared_cookies)
+        openNewTab(home(), incognito = true)
+    }
+
+    private fun needsUnlock(tab: Tab): Boolean {
+        if (tab.unlocked) return false
+        return tab.userLocked || LockedSites.isLocked(this, Uri.parse(urlOf(tab).orEmpty()).host)
+    }
+
+    private fun refreshLock() {
+        ui.locked = ::current.isInitialized && needsUnlock(current)
+    }
+
+    private fun canLock(): Boolean {
+        val ready = AppLock.availability(this) == AppLock.Availability.READY
+        if (!ready) notify(R.string.lock_unavailable)
+        return ready
+    }
+
+    override fun unlockCurrent() {
+        confirmIdentity {
+            current.unlocked = true
+            refreshLock()
+            syncTabs()
+        }
+    }
+
+    override fun toggleTabLock() {
+        if (current.userLocked) {
+            confirmIdentity {
+                current.userLocked = false
+                refreshLock()
+                syncTabs()
+            }
+        } else if (canLock()) {
+            // Stays visible now; it locks when the person leaves the tab or the app.
+            current.userLocked = true
+            current.unlocked = true
+        }
+    }
+
+    override fun toggleSiteLock() {
+        val host = Uri.parse(urlOf(current).orEmpty()).host ?: return
+        val locked = LockedSites.match(this, host)
+        if (locked != null) {
+            confirmIdentity {
+                LockedSites.remove(this, locked)
+                refreshLock()
+                syncTabs()
+            }
+        } else if (canLock()) {
+            LockedSites.add(this, host)
+            current.unlocked = true
+        }
+    }
+
+    // region web permissions
+
+    private fun requestAndroidPermissions(perms: List<String>, needAll: Boolean, done: (Boolean) -> Unit) {
+        val missing = perms.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+        if (missing.isEmpty()) {
+            done(true)
+            return
+        }
+        permissionCallback?.invoke(emptyMap())
+        permissionCallback = { result ->
+            done(if (needAll) missing.all { result[it] == true } else missing.any { result[it] == true } || missing.size < perms.size)
+        }
+        permissionLauncher.launch(missing.toTypedArray())
+    }
+
+    private fun kindOf(resource: String): String? = when (resource) {
+        PermissionRequest.RESOURCE_VIDEO_CAPTURE -> SitePermissions.CAMERA
+        PermissionRequest.RESOURCE_AUDIO_CAPTURE -> SitePermissions.MICROPHONE
+        PermissionRequest.RESOURCE_MIDI_SYSEX -> SitePermissions.MIDI
+        else -> null
+    }
+
+    private fun kindLabel(kind: String): String = getString(
+        when (kind) {
+            SitePermissions.CAMERA -> R.string.perm_camera
+            SitePermissions.MICROPHONE -> R.string.perm_microphone
+            SitePermissions.LOCATION -> R.string.perm_location
+            else -> R.string.perm_midi
+        },
+    )
+
+    private fun askPermission(host: String?, kinds: List<String>, onDecision: (Boolean, Boolean) -> Unit) {
+        if (ui.prompt != null) {
+            onDecision(false, false)
+            return
+        }
+        val label = kinds.joinToString(", ") { kindLabel(it) }
+        ui.prompt = Prompt.Permission(getString(R.string.perm_message, host ?: "?", label), onDecision)
+    }
+
+    /** Camera, microphone and MIDI requests from a page. The person decides; the answer can be remembered per site. */
+    private fun handleWebPermission(request: PermissionRequest) {
+        val host = request.origin.host
+        val wanted = request.resources.filter { kindOf(it) != null || it == PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID }
+        val kinds = wanted.mapNotNull(::kindOf).distinct()
+        val silent = wanted.filter { it == PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID }
+        if (kinds.isEmpty()) {
+            if (silent.isEmpty()) request.deny() else request.grant(silent.toTypedArray())
+            return
+        }
+        val saved = kinds.map { SitePermissions.get(this, host, it) }
+        val allow = {
+            val android = wanted.mapNotNull {
+                when (it) {
+                    PermissionRequest.RESOURCE_VIDEO_CAPTURE -> Manifest.permission.CAMERA
+                    PermissionRequest.RESOURCE_AUDIO_CAPTURE -> Manifest.permission.RECORD_AUDIO
+                    else -> null
+                }
+            }
+            requestAndroidPermissions(android, needAll = true) { ok ->
+                if (ok) request.grant(wanted.toTypedArray()) else request.deny()
+            }
+        }
+        when {
+            saved.all { it == true } -> allow()
+            saved.any { it == false } -> request.deny()
+            else -> {
+                activePermission = request
+                askPermission(host, kinds) { yes, remember ->
+                    activePermission = null
+                    if (remember) kinds.forEach { SitePermissions.set(this, host, it, yes) }
+                    if (yes) allow() else request.deny()
+                }
+            }
+        }
+    }
+
+    private fun handleLocation(origin: String, callback: GeolocationPermissions.Callback) {
+        val host = Uri.parse(origin).host
+        val grant = {
+            requestAndroidPermissions(
+                listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+                needAll = false,
+            ) { ok -> callback.invoke(origin, ok, false) }
+        }
+        when (SitePermissions.get(this, host, SitePermissions.LOCATION)) {
+            true -> grant()
+            false -> callback.invoke(origin, false, false)
+            null -> askPermission(host, listOf(SitePermissions.LOCATION)) { yes, remember ->
+                if (remember) SitePermissions.set(this, host, SitePermissions.LOCATION, yes)
+                if (yes) grant() else callback.invoke(origin, false, false)
+            }
+        }
+    }
+
+    // endregion
+
+    /** Slides the address bar away while scrolling down and back when scrolling up. */
+    private fun onPageScroll(tab: Tab, y: Int, oldY: Int) {
+        if (tab !== current || !prefs.getBoolean(Prefs.HIDE_BAR_SCROLL, true)) return
+        if (y <= 0) {
+            ui.barVisible = true
+            scrollAcc = 0
+            return
+        }
+        if (ui.urlFocused || ui.findVisible) return
+        val now = SystemClock.uptimeMillis()
+        // Resizing the page can itself cause scroll events, so ignore the moments right after a change.
+        if (now - lastBarToggle < 350) {
+            scrollAcc = 0
+            return
+        }
+        val dy = y - oldY
+        if (dy == 0) return
+        scrollAcc = if ((scrollAcc > 0) == (dy > 0)) scrollAcc + dy else dy
+        val threshold = (48 * resources.displayMetrics.density).toInt()
+        if (scrollAcc > threshold && ui.barVisible) {
+            ui.barVisible = false
+            lastBarToggle = now
+            scrollAcc = 0
+        } else if (scrollAcc < -threshold && !ui.barVisible) {
+            ui.barVisible = true
+            lastBarToggle = now
+            scrollAcc = 0
+        }
     }
 
     override fun confirmIdentity(onSuccess: () -> Unit) {
@@ -1049,6 +1286,15 @@ class MainActivity : FragmentActivity(), BrowserHost {
 
     private fun applyPreviewSetting() = AppLock.applyPrivacyFlags(this)
 
+    /** Private tabs are always hidden from screenshots and recents, whatever the general setting says. */
+    private fun applyScreenFlags() {
+        if (::current.isInitialized && current.isPrivate) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            applyPreviewSetting()
+        }
+    }
+
     /** Page security depends on the system WebView, so warn (at most weekly) when it has not been updated for a while. */
     private fun checkEngineAge() {
         val engine = WebView.getCurrentWebViewPackage() ?: return
@@ -1112,6 +1358,7 @@ class MainActivity : FragmentActivity(), BrowserHost {
         const val DESKTOP_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         const val MAX_TABS = 30
+        const val PRIVATE_PROFILE = "brisa_private"
         const val MAX_BLOB = 26214400
     }
 }

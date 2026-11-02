@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.text.format.DateUtils
 import android.text.format.Formatter
+import android.webkit.WebSettings
 import androidx.activity.compose.setContent
 import androidx.annotation.StringRes
 import androidx.activity.enableEdgeToEdge
@@ -162,6 +163,16 @@ class DownloadsActivity : FragmentActivity() {
             }
             if (!isDestroyed) render()
         }
+    }
+
+    /** The system downloader cannot continue a failed download, so this starts it again. */
+    private fun retry(item: Downloads.Item) {
+        val app = applicationContext
+        val tree = item.tree?.let(Uri::parse)?.takeIf { Storage.hasWriteAccess(app, it) }
+        Downloads.remove(app, item.id)
+        val started = DownloadStarter.enqueue(app, item.url, WebSettings.getDefaultUserAgent(app), item.mime, item.name, tree)
+        render()
+        message(if (started) R.string.downloading else R.string.download_failed)
     }
 
     private fun delete(item: Downloads.Item) {
@@ -340,6 +351,15 @@ class DownloadsActivity : FragmentActivity() {
                                 onClick = {
                                     menuOpen = false
                                     share(item)
+                                },
+                            )
+                        }
+                        if (item.status == Downloads.FAILED && item.url.startsWith("http")) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.retry)) },
+                                onClick = {
+                                    menuOpen = false
+                                    retry(item)
                                 },
                             )
                         }

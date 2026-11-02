@@ -17,7 +17,9 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
@@ -55,6 +57,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -140,7 +144,7 @@ fun BrowserScreen(state: BrowserState, host: BrowserHost) {
                 .imePadding(),
         ) {
             if (!state.toolbarBottom) {
-                TopBar(state, host)
+                BarSlot(state, host)
                 LoadProgress(state)
             }
             WebArea(state, host, Modifier.weight(1f))
@@ -153,7 +157,7 @@ fun BrowserScreen(state: BrowserState, host: BrowserHost) {
             ) { FindBar(state, host) }
             if (state.toolbarBottom) {
                 LoadProgress(state)
-                TopBar(state, host)
+                BarSlot(state, host)
             }
         }
 
@@ -181,6 +185,16 @@ fun BrowserScreen(state: BrowserState, host: BrowserHost) {
 }
 
 // region bars
+
+/** The address bar, which slides away while the page is scrolled down. */
+@Composable
+private fun BarSlot(state: BrowserState, host: BrowserHost) {
+    AnimatedVisibility(
+        visible = state.barVisible || state.urlFocused,
+        enter = expandVertically(tween(Motion.MEDIUM, easing = Motion.decelerate)) + fadeIn(tween(Motion.MEDIUM)),
+        exit = shrinkVertically(tween(Motion.MEDIUM, easing = Motion.accelerate)) + fadeOut(tween(Motion.SHORT)),
+    ) { TopBar(state, host) }
+}
 
 @Composable
 private fun TopBar(state: BrowserState, host: BrowserHost) {
@@ -226,7 +240,7 @@ private fun Omnibox(state: BrowserState, host: BrowserHost, modifier: Modifier) 
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val focused = state.urlFocused
-    val shown = if (focused) state.typed else TextFieldValue(displayUrl(state.pageUrl))
+    val shown = if (focused) state.typed else TextFieldValue(if (state.locked) "" else displayUrl(state.pageUrl))
     val border by animateColorAsState(
         targetValue = if (focused) scheme.primary else Color.Transparent,
         animationSpec = tween(Motion.MEDIUM, easing = Motion.standard),
@@ -236,12 +250,13 @@ private fun Omnibox(state: BrowserState, host: BrowserHost, modifier: Modifier) 
     Row(
         modifier
             .clip(shape)
-            .background(scheme.surfaceContainerHighest)
+            .background(if (state.currentPrivate) scheme.primaryContainer else scheme.surfaceContainerHighest)
             .border(2.dp, border, shape),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val url = state.pageUrl
         val (icon, tint) = when {
+            state.currentPrivate && !focused -> R.drawable.ic_visibility_off to scheme.onSurfaceVariant
             focused || url.isNullOrEmpty() -> R.drawable.ic_search to scheme.onSurfaceVariant
             url.startsWith("https://") -> R.drawable.ic_lock to scheme.onSurfaceVariant
             else -> R.drawable.ic_lock_open to scheme.error
@@ -471,6 +486,7 @@ private fun BrowserMenu(
         }
         HorizontalDivider(Modifier.padding(vertical = 4.dp), color = scheme.outlineVariant)
         item(R.drawable.ic_add, R.string.new_tab) { host.newTab() }
+        item(R.drawable.ic_visibility_off, R.string.new_private_tab) { host.newPrivateTab() }
         item(R.drawable.ic_search, R.string.find_in_page) { host.openFind() }
         item(R.drawable.ic_share, R.string.share) { host.share() }
         item(R.drawable.ic_star, R.string.bookmarks) { state.sheet = Sheet.BOOKMARKS }
@@ -482,6 +498,20 @@ private fun BrowserMenu(
             trailingIcon = { Switch(checked = info.desktop, onCheckedChange = null) },
             onClick = { act { host.toggleDesktop() } },
         )
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.lock_tab)) },
+            leadingIcon = { Icon(painterResource(R.drawable.ic_lock), contentDescription = null, tint = scheme.onSurfaceVariant) },
+            trailingIcon = { Switch(checked = info.tabLocked, onCheckedChange = null) },
+            onClick = { act { host.toggleTabLock() } },
+        )
+        if (info.siteLockable) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.lock_site)) },
+                leadingIcon = { Icon(painterResource(R.drawable.ic_lock), contentDescription = null, tint = scheme.onSurfaceVariant) },
+                trailingIcon = { Switch(checked = info.siteLocked, onCheckedChange = null) },
+                onClick = { act { host.toggleSiteLock() } },
+            )
+        }
         if (info.showProtection) {
             DropdownMenuItem(
                 text = {
@@ -507,6 +537,30 @@ private fun BrowserMenu(
 // endregion
 
 // region web area
+
+@Composable
+private fun LockedCover(host: BrowserHost) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
+        color = scheme.surface,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+        ) {
+            Icon(painterResource(R.drawable.ic_lock), contentDescription = null, tint = scheme.onSurfaceVariant, modifier = Modifier.size(40.dp))
+            Text(
+                stringResource(R.string.page_locked),
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 12.dp, bottom = 20.dp),
+            )
+            Button(onClick = { host.unlockCurrent() }) { Text(stringResource(R.string.lock_unlock)) }
+        }
+    }
+}
 
 private class Suggestion(@DrawableRes val icon: Int, val title: String, val subtitle: String, val url: String)
 
@@ -551,6 +605,8 @@ private fun WebArea(state: BrowserState, host: BrowserHost, modifier: Modifier) 
                 layout.setProgressBackgroundColorSchemeColor(spinnerBg)
             },
         )
+
+        if (state.locked) LockedCover(host)
 
         val typed = state.typed.text
         val show = state.urlFocused && typed.isNotEmpty() && typed != host.currentUrl()
@@ -682,6 +738,7 @@ private fun EntryRow(
     onOpen: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    isPrivate: Boolean = false,
 ) {
     val scheme = MaterialTheme.colorScheme
     val seed = subtitle.ifEmpty { title }
@@ -701,7 +758,9 @@ private fun EntryRow(
             Modifier.size(42.dp).clip(CircleShape).background(color.copy(alpha = 0.2f)),
             contentAlignment = Alignment.Center,
         ) {
-            if (favicon != null) {
+            if (isPrivate) {
+                Icon(painterResource(R.drawable.ic_visibility_off), contentDescription = null, tint = color, modifier = Modifier.size(22.dp))
+            } else if (favicon != null) {
                 Image(favicon.asImageBitmap(), contentDescription = null, modifier = Modifier.size(24.dp))
             } else {
                 Text(
@@ -763,6 +822,7 @@ private fun TabsSheet(state: BrowserState, host: BrowserHost) {
                 },
                 onClose = { host.closeTab(entry.id) },
                 modifier = Modifier.animateItem(),
+                isPrivate = entry.isPrivate,
             )
         }
     }
@@ -870,26 +930,8 @@ private fun PromptDialog(prompt: Prompt, state: BrowserState) {
         state.prompt = null
     }
     when (prompt) {
-        is Prompt.Download -> BrisaDialog(
-            onDismissRequest = ::close,
-            title = { Text(stringResource(R.string.download_title)) },
-            text = { Text(prompt.message) },
-            confirmButton = {
-                TextButton(onClick = {
-                    close()
-                    prompt.onConfirm()
-                }) { Text(stringResource(R.string.download)) }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(onClick = {
-                        close()
-                        prompt.onChangeFolder()
-                    }) { Text(stringResource(R.string.change_folder)) }
-                    TextButton(onClick = ::close) { Text(stringResource(android.R.string.cancel)) }
-                }
-            },
-        )
+        is Prompt.Download -> DownloadDialog(prompt, ::close)
+        is Prompt.Permission -> PermissionDialog(prompt, ::close)
         is Prompt.External -> BrisaDialog(
             onDismissRequest = ::close,
             title = { Text(stringResource(R.string.external_title)) },
@@ -927,6 +969,80 @@ private fun PromptDialog(prompt: Prompt, state: BrowserState) {
             dismissButton = { TextButton(onClick = ::close) { Text(stringResource(android.R.string.cancel)) } },
         )
     }
+}
+
+@Composable
+private fun DownloadDialog(prompt: Prompt.Download, close: () -> Unit) {
+    var name by remember { mutableStateOf(prompt.name) }
+    BrisaDialog(
+        onDismissRequest = close,
+        title = { Text(stringResource(R.string.download_title)) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(stringResource(R.string.file_name)) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(prompt.message, modifier = Modifier.padding(top = 12.dp))
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                close()
+                prompt.onConfirm(name)
+            }) { Text(stringResource(R.string.download)) }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = {
+                    close()
+                    prompt.onChangeFolder(name)
+                }) { Text(stringResource(R.string.change_folder)) }
+                TextButton(onClick = close) { Text(stringResource(android.R.string.cancel)) }
+            }
+        },
+    )
+}
+
+@Composable
+private fun PermissionDialog(prompt: Prompt.Permission, close: () -> Unit) {
+    var keep by remember { mutableStateOf(true) }
+    BrisaDialog(
+        onDismissRequest = {
+            close()
+            prompt.onDecision(false, false)
+        },
+        title = { Text(stringResource(R.string.perm_title)) },
+        text = {
+            Column {
+                Text(prompt.message)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp)
+                        .clickable { keep = !keep },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(checked = keep, onCheckedChange = null)
+                    Text(stringResource(R.string.perm_remember), Modifier.padding(start = 12.dp))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                close()
+                prompt.onDecision(true, keep)
+            }) { Text(stringResource(R.string.perm_allow)) }
+        },
+        dismissButton = {
+            TextButton(onClick = {
+                close()
+                prompt.onDecision(false, keep)
+            }) { Text(stringResource(R.string.perm_block)) }
+        },
+    )
 }
 
 @Composable

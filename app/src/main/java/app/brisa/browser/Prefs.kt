@@ -39,6 +39,7 @@ object Prefs {
     const val DOWNLOAD_TREE = "download_tree"
 
     const val ONE_HAND = "one_hand"
+    const val HIDE_BAR_SCROLL = "hide_bar_on_scroll"
     const val HISTORY_DECOY = "history_decoy"
     const val DECOY_SEED = "decoy_seed"
     const val DECOY_CLEARED = "decoy_cleared"

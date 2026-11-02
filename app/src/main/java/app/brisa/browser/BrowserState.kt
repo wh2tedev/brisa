@@ -12,7 +12,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.input.TextFieldValue
 
 /** One row in the tabs sheet. */
-data class TabEntry(val id: Long, val title: String, val subtitle: String, val favicon: Bitmap?, val selected: Boolean)
+data class TabEntry(
+    val id: Long,
+    val title: String,
+    val subtitle: String,
+    val favicon: Bitmap?,
+    val selected: Boolean,
+    val isPrivate: Boolean,
+)
 
 /** What the overflow menu needs to know about the current page, captured when it opens. */
 data class MenuInfo(
@@ -25,13 +32,22 @@ data class MenuInfo(
     val showProtection: Boolean,
     val protectionOn: Boolean,
     val blocked: Int,
+    val tabLocked: Boolean,
+    val siteLocked: Boolean,
+    val siteLockable: Boolean,
 )
 
 enum class Sheet { TABS, BOOKMARKS, HISTORY }
 
 /** Dialogs the browser can ask for. They carry their own callbacks so the UI needs no knowledge of WebView. */
 sealed interface Prompt {
-    class Download(val message: String, val onConfirm: () -> Unit, val onChangeFolder: () -> Unit) : Prompt
+    class Download(
+        val name: String,
+        val message: String,
+        val onConfirm: (name: String) -> Unit,
+        val onChangeFolder: (name: String) -> Unit,
+    ) : Prompt
+    class Permission(val message: String, val onDecision: (allow: Boolean, remember: Boolean) -> Unit) : Prompt
     class External(val message: String, val onOpen: () -> Unit) : Prompt
     class Auth(
         val message: String,
@@ -62,6 +78,13 @@ class BrowserState {
     var findCount by mutableStateOf("")
     var customView by mutableStateOf<View?>(null)
     var urlFocused by mutableStateOf(false)
+    var currentPrivate by mutableStateOf(false)
+
+    /** The current tab is locked and must be unlocked with the phone's lock before it is shown. */
+    var locked by mutableStateOf(false)
+
+    /** False while the address bar is tucked away after scrolling down. */
+    var barVisible by mutableStateOf(true)
     var typed by mutableStateOf(TextFieldValue(""))
 
     /** Bumped when a tab is selected: replays the reveal animation and drops address bar focus. */
@@ -82,6 +105,10 @@ interface BrowserHost {
     fun engineName(): String
     fun reload()
     fun newTab()
+    fun newPrivateTab()
+    fun unlockCurrent()
+    fun toggleTabLock()
+    fun toggleSiteLock()
     fun selectTab(id: Long)
     fun closeTab(id: Long)
     fun menuInfo(): MenuInfo
