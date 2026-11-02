@@ -198,4 +198,18 @@
     <string name="hide_password">Hide password</string>
     <string name="back_to_settings">Back</string>
     <string name="text_size_value">%1$d%%</string>
+    <string name="site_folder_general">General folder</string>
+    <string name="site_folder_choose">Choose a folder for %1$s…</string>
+    <string name="site_folder_title">Download location for %1$s</string>
+    <string name="pref_site_folders">Folders by site</string>
+    <string name="pref_site_folders_sum">Save downloads from a site in its own folder</string>
+    <string name="site_folders_count">%1$d sites</string>
+    <string name="site_folders_empty">No site has its own folder yet. Download a file and tap Change folder, or add one here.</string>
+    <string name="site_folders_add">Add site</string>
+    <string name="site_folders_hint">Site, for example example.com</string>
+    <string name="site_folders_remove">Remove</string>
+    <string name="site_folders_next">Choose folder</string>
+    <string name="pref_one_hand">One-handed mode</string>
+    <string name="hide_real_history">Hide real history</string>
+    <string name="show_real_history">Show real history</string>
 </resources>

@@ -50,6 +50,9 @@ class BrowserState {
     var progress by mutableIntStateOf(0)
     var refreshing by mutableStateOf(false)
     var toolbarBottom by mutableStateOf(false)
+
+    /** "off", "left" or "right": which hand the controls are arranged for. */
+    var oneHand by mutableStateOf("off")
     var pullEnabled by mutableStateOf(true)
     var tabEntries by mutableStateOf<List<TabEntry>>(emptyList())
     var sheet by mutableStateOf<Sheet?>(null)
@@ -96,6 +99,9 @@ interface BrowserHost {
     fun toggleDesktop()
     fun setProtection(on: Boolean)
     fun exitFullscreen()
+
+    /** Runs [onSuccess] once the phone's own lock has been confirmed (or at once if the phone has none). */
+    fun confirmIdentity(onSuccess: () -> Unit)
 }
 
 /** Host name without "www.", used wherever an address is shown to the person. */

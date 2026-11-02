@@ -184,27 +184,39 @@ fun BrowserScreen(state: BrowserState, host: BrowserHost) {
 
 @Composable
 private fun TopBar(state: BrowserState, host: BrowserHost) {
-    var menuOpen by remember { mutableStateOf(false) }
-    var info by remember { mutableStateOf<MenuInfo?>(null) }
-    val view = LocalView.current
+    val left = state.oneHand == "left"
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = 12.dp, end = 4.dp, top = 9.dp, bottom = 9.dp),
+            .padding(start = if (left) 4.dp else 12.dp, end = if (left) 12.dp else 4.dp, top = 9.dp, bottom = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Omnibox(state, host, Modifier.weight(1f).height(46.dp))
-        TabsButton(state)
-        Box {
-            PressableIconButton(onClick = {
-                view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
-                info = host.menuInfo()
-                menuOpen = true
-            }) {
-                Icon(painterResource(R.drawable.ic_more_vert), contentDescription = stringResource(R.string.more))
-            }
-            BrowserMenu(menuOpen, info, state, host) { menuOpen = false }
+        if (left) {
+            MenuButton(state, host)
+            TabsButton(state)
         }
+        Omnibox(state, host, Modifier.weight(1f).height(46.dp))
+        if (!left) {
+            TabsButton(state)
+            MenuButton(state, host)
+        }
+    }
+}
+
+@Composable
+private fun MenuButton(state: BrowserState, host: BrowserHost) {
+    var menuOpen by remember { mutableStateOf(false) }
+    var info by remember { mutableStateOf<MenuInfo?>(null) }
+    val view = LocalView.current
+    Box {
+        PressableIconButton(onClick = {
+            view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+            info = host.menuInfo()
+            menuOpen = true
+        }) {
+            Icon(painterResource(R.drawable.ic_more_vert), contentDescription = stringResource(R.string.more))
+        }
+        BrowserMenu(menuOpen, info, state, host) { menuOpen = false }
     }
 }
 
@@ -585,7 +597,7 @@ private fun buildSuggestions(context: android.content.Context, host: BrowserHost
 
     val bookmarks = Bookmarks.all(context).filter { matches(it.title, it.url) }
         .map { Suggestion(R.drawable.ic_star, it.title.ifBlank { it.url }, displayUrl(it.url), it.url) }
-    val visited = History.all(context).filter { matches(it.title, it.url) }
+    val visited = HistoryView.all(context).filter { matches(it.title, it.url) }
         .map { Suggestion(R.drawable.ic_history, it.title.ifBlank { it.url }, displayUrl(it.url), it.url) }
     val seen = mutableSetOf<String>()
     return listOf(first) + (bookmarks + visited).filter { seen.add(it.url) }.take(5)
@@ -624,6 +636,7 @@ private fun ListSheet(
     onDismiss: () -> Unit,
     buttonLabel: String?,
     onButton: (dismiss: () -> Unit) -> Unit,
+    headerAction: (@Composable () -> Unit)? = null,
     content: LazyListScope.(dismiss: () -> Unit) -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -637,12 +650,18 @@ private fun ListSheet(
         sheetState = sheetState,
         containerColor = scheme.surfaceContainerHigh,
     ) {
-        Text(
-            title,
-            color = scheme.onSurfaceVariant,
-            style = MaterialTheme.typography.titleSmall,
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-        )
+        Row(
+            Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                title,
+                color = scheme.onSurfaceVariant,
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.weight(1f).padding(vertical = 8.dp),
+            )
+            headerAction?.invoke()
+        }
         val maxList = (LocalConfiguration.current.screenHeightDp * 0.45f).dp
         LazyColumn(Modifier.heightIn(max = maxList)) { content(this, dismiss) }
         if (buttonLabel != null) {
@@ -783,14 +802,40 @@ private fun BookmarksSheet(state: BrowserState, host: BrowserHost) {
 @Composable
 private fun HistorySheet(state: BrowserState, host: BrowserHost) {
     val context = LocalContext.current
-    val list = remember { mutableStateListOf<History.Entry>().apply { addAll(History.all(context).take(100)) } }
+    var decoy by remember { mutableStateOf(DecoyHistory.enabled(context)) }
+    val list = remember { mutableStateListOf<History.Entry>().apply { addAll(HistoryView.all(context).take(100)) } }
+    fun reload() {
+        list.clear()
+        list.addAll(HistoryView.all(context).take(100))
+    }
     ListSheet(
         title = stringResource(R.string.history),
         onDismiss = { state.sheet = null },
         buttonLabel = stringResource(R.string.clear_history),
         onButton = {
-            History.clear(context)
+            HistoryView.clear(context)
             list.clear()
+        },
+        headerAction = {
+            PressableIconButton(onClick = {
+                if (!decoy) {
+                    DecoyHistory.setEnabled(context, true)
+                    decoy = true
+                    reload()
+                } else {
+                    // Showing the real list again needs the phone's own lock, so nobody else can switch it back.
+                    host.confirmIdentity {
+                        DecoyHistory.setEnabled(context, false)
+                        decoy = false
+                        reload()
+                    }
+                }
+            }) {
+                Icon(
+                    painterResource(if (decoy) R.drawable.ic_visibility else R.drawable.ic_visibility_off),
+                    contentDescription = stringResource(if (decoy) R.string.show_real_history else R.string.hide_real_history),
+                )
+            }
         },
     ) { dismiss ->
         if (list.isEmpty()) item { EmptyText(R.string.empty_history) }
@@ -806,7 +851,7 @@ private fun HistorySheet(state: BrowserState, host: BrowserHost) {
                     dismiss()
                 },
                 onClose = {
-                    History.remove(context, entry.url)
+                    HistoryView.remove(context, entry.url)
                     list.remove(entry)
                 },
                 modifier = Modifier.animateItem(),

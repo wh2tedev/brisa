@@ -31,29 +31,45 @@ class FolderPicker(private val activity: ComponentActivity) {
     private var done: (() -> Unit)? = null
     private var visible by mutableStateOf(false)
     private var custom by mutableStateOf(false)
+    private var site by mutableStateOf<String?>(null)
 
     private val launcher = activity.registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) setTree(uri)
         finish()
     }
 
-    /** [onDone] runs after the choice is made, or if the person backs out. */
-    fun show(onDone: (() -> Unit)? = null) {
+    /**
+     * [host] limits the choice to downloads from that site; without it the general folder is changed.
+     * [onDone] runs after the choice is made, or if the person backs out.
+     */
+    fun show(host: String? = null, onDone: (() -> Unit)? = null) {
         done = onDone
-        custom = Storage.treeUri(activity) != null
+        site = SiteFolders.key(host)
+        val current = site
+        custom = if (current == null) Storage.generalTree(activity) != null else SiteFolders.get(activity, current) != null
         visible = true
     }
 
     @Composable
     fun Dialog() {
         if (!visible) return
-        val labels = listOf(stringResource(R.string.default_folder), stringResource(R.string.choose_folder))
+        val host = site
+        val labels = if (host == null) {
+            listOf(stringResource(R.string.default_folder), stringResource(R.string.choose_folder))
+        } else {
+            listOf(stringResource(R.string.site_folder_general), stringResource(R.string.site_folder_choose, host))
+        }
         BrisaDialog(
             onDismissRequest = {
                 visible = false
                 finish()
             },
-            title = { Text(stringResource(R.string.folder_title)) },
+            title = {
+                Text(
+                    if (host == null) stringResource(R.string.folder_title)
+                    else stringResource(R.string.site_folder_title, host),
+                )
+            },
             text = {
                 Column(Modifier.selectableGroup()) {
                     labels.forEachIndexed { index, label ->
@@ -100,16 +116,17 @@ class FolderPicker(private val activity: ComponentActivity) {
 
     private fun setTree(uri: Uri?) {
         val resolver = activity.contentResolver
-        val prefs = activity.defaultPrefs()
-        val old = prefs.getString(Prefs.DOWNLOAD_TREE, null)?.let(Uri::parse)
         if (uri != null) {
             resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
         }
-        if (old != null && old != uri) {
-            runCatching {
-                resolver.releasePersistableUriPermission(old, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            }
+        val host = site
+        if (host != null) {
+            SiteFolders.set(activity, host, uri)
+            return
         }
+        val prefs = activity.defaultPrefs()
+        val old = prefs.getString(Prefs.DOWNLOAD_TREE, null)?.let(Uri::parse)
         prefs.edit { if (uri == null) remove(Prefs.DOWNLOAD_TREE) else putString(Prefs.DOWNLOAD_TREE, uri.toString()) }
+        if (old != null && old != uri) SiteFolders.releaseIfUnused(activity, old)
     }
 }

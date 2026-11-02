@@ -38,6 +38,12 @@ object Prefs {
     const val CONFIRM_DOWNLOADS = "confirm_downloads"
     const val DOWNLOAD_TREE = "download_tree"
 
+    const val ONE_HAND = "one_hand"
+    const val HISTORY_DECOY = "history_decoy"
+    const val DECOY_SEED = "decoy_seed"
+    const val DECOY_CLEARED = "decoy_cleared"
+    const val DECOY_REMOVED = "decoy_removed"
+
     const val ACCENT_DYNAMIC = "dynamic"
 
     const val CLEAR_HISTORY = "history"

@@ -16,17 +16,25 @@ import java.io.OutputStream
 
 /** Where downloads are written: the public Downloads folder, or a folder the user picked. */
 object Storage {
-    fun treeUri(context: Context): Uri? {
+    fun hasWriteAccess(context: Context, uri: Uri): Boolean =
+        context.contentResolver.persistedUriPermissions.any { it.uri == uri && it.isWritePermission }
+
+    /** The general folder, ignoring any per-site choice. */
+    fun generalTree(context: Context): Uri? {
         val raw = context.defaultPrefs().getString(Prefs.DOWNLOAD_TREE, null) ?: return null
-        val uri = Uri.parse(raw)
-        val ok = context.contentResolver.persistedUriPermissions.any { it.uri == uri && it.isWritePermission }
-        return uri.takeIf { ok }
+        return Uri.parse(raw).takeIf { hasWriteAccess(context, it) }
     }
 
-    fun label(context: Context): String {
-        val tree = treeUri(context) ?: return context.getString(R.string.default_folder)
-        return DocumentFile.fromTreeUri(context, tree)?.name ?: context.getString(R.string.default_folder)
+    /** The folder for downloads started from [site], falling back to the general folder. */
+    fun treeUri(context: Context, site: String? = null): Uri? {
+        SiteFolders.find(context, site)?.takeIf { hasWriteAccess(context, it) }?.let { return it }
+        return generalTree(context)
     }
+
+    fun labelOf(context: Context, tree: Uri?): String =
+        tree?.let { DocumentFile.fromTreeUri(context, it)?.name } ?: context.getString(R.string.default_folder)
+
+    fun label(context: Context, site: String? = null): String = labelOf(context, treeUri(context, site))
 
     /** Writes a file and returns its Uri, or null on failure. Falls back to public Downloads if the chosen folder fails. */
     fun save(context: Context, name: String, mime: String, tree: Uri?, write: (OutputStream) -> Unit): Uri? {

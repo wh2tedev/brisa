@@ -96,6 +96,7 @@ class MainActivity : FragmentActivity(), BrowserHost {
     private val web get() = current.web
     private var blobToken: String? = null
     private var blobName = ""
+    private var blobHost: String? = null
     private val blobBridge = BlobBridge(
         onSave = { token, mime, data -> runOnUiThread { finishBlob(token, mime, data) } },
         onFail = { token ->
@@ -128,7 +129,7 @@ class MainActivity : FragmentActivity(), BrowserHost {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         prefs = defaultPrefs()
-        ui.toolbarBottom = prefs.getString(Prefs.TOOLBAR, "top") == "bottom"
+        applyToolbarPosition()
         ui.pullEnabled = prefs.getBoolean(Prefs.PULL_REFRESH, true)
 
         // Added before the content so Compose's own back handlers (find bar, address bar, fullscreen) take priority.
@@ -302,35 +303,37 @@ class MainActivity : FragmentActivity(), BrowserHost {
         length: Long,
     ) {
         val name = URLUtil.guessFileName(if (url.startsWith("http")) url else "download", disposition, mime)
+        val site = Uri.parse(source.url.orEmpty()).host
         when {
             url.startsWith("https://") || url.startsWith("http://") ->
-                confirmDownload(name, length) { enqueue(url, userAgent, mime, name) }
+                confirmDownload(name, length, site) { enqueue(url, userAgent, mime, name, site) }
             url.startsWith("data:") -> {
                 val decoded = decodeDataUrl(url) ?: return notify(R.string.download_failed)
-                confirmDownload(name, decoded.second.size.toLong()) { saveBytes(name, decoded.first, decoded.second) }
+                confirmDownload(name, decoded.second.size.toLong(), site) { saveBytes(name, decoded.first, decoded.second, site) }
             }
-            url.startsWith("blob:") -> confirmDownload(name, length) {
+            url.startsWith("blob:") -> confirmDownload(name, length, site) {
                 val token = UUID.randomUUID().toString()
                 blobToken = token
                 blobName = name
+                blobHost = site
                 source.evaluateJavascript(blobScript(url, token), null)
             }
         }
     }
 
-    private fun confirmDownload(name: String, size: Long, onConfirm: () -> Unit) {
+    private fun confirmDownload(name: String, size: Long, site: String?, onConfirm: () -> Unit) {
         val risky = name.substringAfterLast('.', "").lowercase() in RISKY_EXTENSIONS
         if (!risky && !prefs.getBoolean(Prefs.CONFIRM_DOWNLOADS, true)) {
             onConfirm()
             return
         }
         val detail = if (size > 0) Formatter.formatShortFileSize(this, size) else getString(R.string.unknown_size)
-        val message = "$name\n$detail\n\n${getString(R.string.save_to)}: ${Storage.label(this)}" +
+        val message = "$name\n$detail\n\n${getString(R.string.save_to)}: ${Storage.label(this, site)}" +
             if (risky) "\n\n" + getString(R.string.download_risky) else ""
         ui.prompt = Prompt.Download(
             message = message,
             onConfirm = onConfirm,
-            onChangeFolder = { folderPicker.show { confirmDownload(name, size, onConfirm) } },
+            onChangeFolder = { folderPicker.show(site) { confirmDownload(name, size, site, onConfirm) } },
         )
     }
 
@@ -347,10 +350,10 @@ class MainActivity : FragmentActivity(), BrowserHost {
     }
 
     /** Hands an http(s) download to the system downloader and records it in the Downloads list. */
-    private fun enqueue(url: String, userAgent: String, mime: String?, suggested: String) {
+    private fun enqueue(url: String, userAgent: String, mime: String?, suggested: String, site: String?) {
         val name = uniqueName(suggested)
         val id = UUID.randomUUID().toString()
-        val tree = Storage.treeUri(this)
+        val tree = Storage.treeUri(this, site)
         val base = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
         val request = DownloadManager.Request(Uri.parse(url))
             .setTitle(name)
@@ -381,9 +384,9 @@ class MainActivity : FragmentActivity(), BrowserHost {
     }
 
     /** Saves bytes we already have (data: and blob: downloads) off the main thread. */
-    private fun saveBytes(name: String, mime: String, bytes: ByteArray) {
+    private fun saveBytes(name: String, mime: String, bytes: ByteArray, site: String?) {
         val app = applicationContext
-        val tree = Storage.treeUri(this)
+        val tree = Storage.treeUri(this, site)
         Thread {
             val uri = Storage.save(app, name, mime, tree) { it.write(bytes) }
             if (uri != null) {
@@ -398,7 +401,7 @@ class MainActivity : FragmentActivity(), BrowserHost {
             }
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
-                if (uri != null) notify(getString(R.string.saved_to, Storage.label(this)), R.string.view) { openDownloads() }
+                if (uri != null) notify(getString(R.string.saved_to, Storage.labelOf(this, tree)), R.string.view) { openDownloads() }
                 else notify(R.string.download_failed)
             }
         }.start()
@@ -432,7 +435,7 @@ class MainActivity : FragmentActivity(), BrowserHost {
         blobToken = null
         val bytes = runCatching { Base64.decode(data, Base64.DEFAULT) }.getOrNull()
             ?: return notify(R.string.download_failed)
-        saveBytes(blobName, mime, bytes)
+        saveBytes(blobName, mime, bytes, blobHost)
     }
 
     private fun decodeDataUrl(url: String): Pair<String, ByteArray>? = runCatching {
@@ -964,6 +967,14 @@ class MainActivity : FragmentActivity(), BrowserHost {
         ui.findVisible = false
     }
 
+    override fun confirmIdentity(onSuccess: () -> Unit) {
+        if (AppLock.availability(this) != AppLock.Availability.READY) {
+            onSuccess()
+            return
+        }
+        AppLock.authenticate(this, getString(R.string.lock_confirm_title), onSuccess = onSuccess)
+    }
+
     override fun exitFullscreen() {
         val view = ui.customView ?: return
         ui.customView = null
@@ -1086,7 +1097,9 @@ class MainActivity : FragmentActivity(), BrowserHost {
 
     /** Moves the address bar to the top or bottom of the screen, following Settings. */
     private fun applyToolbarPosition() {
-        ui.toolbarBottom = prefs.getString(Prefs.TOOLBAR, "top") == "bottom"
+        ui.oneHand = prefs.getString(Prefs.ONE_HAND, "off") ?: "off"
+        // One-handed mode keeps the controls within thumb reach, so the bar always goes to the bottom.
+        ui.toolbarBottom = ui.oneHand != "off" || prefs.getString(Prefs.TOOLBAR, "top") == "bottom"
     }
 
     // endregion

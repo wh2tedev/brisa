@@ -5,6 +5,7 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Bundle
+import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -29,6 +30,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -234,6 +238,11 @@ class SettingsActivity : FragmentActivity() {
                 stringArrayResource(R.array.pos_names).toList(),
                 stringArrayResource(R.array.pos_values).toList(),
             )
+            ListPreference(
+                prefs, Prefs.ONE_HAND, "off", R.string.pref_one_hand,
+                stringArrayResource(R.array.hand_names).toList(),
+                stringArrayResource(R.array.hand_values).toList(),
+            )
         }
         PrefCategory(R.string.cat_pages) {
             SwitchPreference(prefs, Prefs.WEB_DARK, false, R.string.pref_web_dark, R.string.pref_web_dark_sum)
@@ -330,16 +339,32 @@ class SettingsActivity : FragmentActivity() {
     private fun DownloadsPage() {
         val activity = this@SettingsActivity
         var location by remember { mutableStateOf(Storage.label(activity)) }
+        var showSites by remember { mutableStateOf(false) }
+        var siteCount by remember { mutableStateOf(SiteFolders.all(activity).size) }
         PrefCategory(R.string.cat_downloads) {
             PrefRow(
                 title = stringResource(R.string.pref_dl_location),
                 summary = location,
                 onClick = { folderPicker.show { location = Storage.label(activity) } },
             )
+            PrefRow(
+                title = stringResource(R.string.pref_site_folders),
+                summary = stringResource(R.string.pref_site_folders_sum) + " · " +
+                    stringResource(R.string.site_folders_count, siteCount),
+                onClick = { showSites = true },
+            )
             SwitchPreference(prefs, Prefs.CONFIRM_DOWNLOADS, true, R.string.pref_dl_confirm, R.string.pref_dl_confirm_sum)
             PrefRow(
                 title = stringResource(R.string.pref_dl_open),
                 onClick = ::openDownloads,
+            )
+        }
+        if (showSites) {
+            SiteFoldersDialog(
+                onDismiss = {
+                    showSites = false
+                    siteCount = SiteFolders.all(activity).size
+                },
             )
         }
     }
@@ -482,6 +507,78 @@ class SettingsActivity : FragmentActivity() {
             },
             dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.cancel)) } },
         )
+    }
+
+    @Composable
+    private fun SiteFoldersDialog(onDismiss: () -> Unit) {
+        val activity = this@SettingsActivity
+        var sites by remember { mutableStateOf(SiteFolders.all(activity)) }
+        var adding by remember { mutableStateOf(false) }
+        var draft by remember { mutableStateOf("") }
+        if (adding) {
+            BrisaDialog(
+                onDismissRequest = { adding = false },
+                title = { Text(stringResource(R.string.site_folders_add)) },
+                text = {
+                    OutlinedTextField(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        singleLine = true,
+                        placeholder = { Text(stringResource(R.string.site_folders_hint)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = SiteFolders.key(siteOf(draft)) != null,
+                        onClick = {
+                            val host = siteOf(draft)
+                            adding = false
+                            draft = ""
+                            folderPicker.show(host) { sites = SiteFolders.all(activity) }
+                        },
+                    ) { Text(stringResource(R.string.site_folders_next)) }
+                },
+                dismissButton = { TextButton(onClick = { adding = false }) { Text(stringResource(android.R.string.cancel)) } },
+            )
+        }
+        BrisaDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(stringResource(R.string.pref_site_folders)) },
+            text = {
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                    if (sites.isEmpty()) Text(stringResource(R.string.site_folders_empty))
+                    sites.forEach { (host, tree) ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(host)
+                                Text(
+                                    Storage.labelOf(activity, tree),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            IconButton(onClick = {
+                                SiteFolders.set(activity, host, null)
+                                sites = SiteFolders.all(activity)
+                            }) {
+                                Icon(painterResource(R.drawable.ic_close), contentDescription = stringResource(R.string.site_folders_remove))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.ok)) } },
+            dismissButton = { TextButton(onClick = { adding = true }) { Text(stringResource(R.string.site_folders_add)) } },
+        )
+    }
+
+    /** Accepts "example.com", "www.example.com" or a full address. */
+    private fun siteOf(input: String): String? {
+        val text = input.trim()
+        if (text.isEmpty()) return null
+        return Uri.parse(if ("://" in text) text else "https://$text").host
     }
 
     @Composable

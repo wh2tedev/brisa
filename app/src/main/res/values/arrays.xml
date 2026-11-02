@@ -6,6 +6,8 @@
     <string-array name="theme_values"><item>system</item><item>light</item><item>dark</item></string-array>
     <string-array name="accent_names"><item>Material You (wallpaper colors)</item><item>Blue</item><item>Green</item><item>Purple</item><item>Orange</item><item>Pink</item><item>Teal</item><item>Red</item><item>White</item></string-array>
     <string-array name="accent_values"><item>dynamic</item><item>blue</item><item>green</item><item>purple</item><item>orange</item><item>pink</item><item>teal</item><item>red</item><item>white</item></string-array>
+    <string-array name="hand_names"><item>Off</item><item>Left hand</item><item>Right hand</item></string-array>
+    <string-array name="hand_values"><item>off</item><item>left</item><item>right</item></string-array>
     <string-array name="pos_names"><item>Top</item><item>Bottom</item></string-array>
     <string-array name="pos_values"><item>top</item><item>bottom</item></string-array>
     <string-array name="lock_timeout_names">
