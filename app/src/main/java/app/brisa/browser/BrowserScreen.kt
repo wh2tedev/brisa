@@ -79,6 +79,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -87,6 +88,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -119,7 +122,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun BrowserScreen(state: BrowserState, host: BrowserHost) {
@@ -143,11 +148,7 @@ fun BrowserScreen(state: BrowserState, host: BrowserHost) {
                 .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))
                 .imePadding(),
         ) {
-            if (!state.toolbarBottom) {
-                BarSlot(state, host)
-                LoadProgress(state)
-            }
-            WebArea(state, host, Modifier.weight(1f))
+            BarAndPage(state, host, Modifier.weight(1f))
             AnimatedVisibility(
                 visible = state.findVisible,
                 enter = fadeIn(tween(Motion.MEDIUM, easing = Motion.decelerate)) +
@@ -155,10 +156,6 @@ fun BrowserScreen(state: BrowserState, host: BrowserHost) {
                 exit = fadeOut(tween(Motion.SHORT, easing = Motion.accelerate)) +
                     slideOutVertically(tween(Motion.SHORT, easing = Motion.accelerate)) { it },
             ) { FindBar(state, host) }
-            if (state.toolbarBottom) {
-                LoadProgress(state)
-                BarSlot(state, host)
-            }
         }
 
         val custom = state.customView
@@ -186,14 +183,50 @@ fun BrowserScreen(state: BrowserState, host: BrowserHost) {
 
 // region bars
 
-/** The address bar, which slides away while the page is scrolled down. */
+/**
+ * The address bar and the page. While the bar slides away the page is only moved, never resized, so nothing
+ * is laid out again on every frame. The page is resized once, after the slide has finished, like Chrome does.
+ */
 @Composable
-private fun BarSlot(state: BrowserState, host: BrowserHost) {
-    AnimatedVisibility(
-        visible = state.barVisible || state.urlFocused,
-        enter = expandVertically(tween(Motion.MEDIUM, easing = Motion.decelerate)) + fadeIn(tween(Motion.MEDIUM)),
-        exit = shrinkVertically(tween(Motion.MEDIUM, easing = Motion.accelerate)) + fadeOut(tween(Motion.SHORT)),
-    ) { TopBar(state, host) }
+private fun BarAndPage(state: BrowserState, host: BrowserHost, modifier: Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    val density = LocalDensity.current
+    val bottom = state.toolbarBottom
+    var barPx by remember { mutableIntStateOf(with(density) { 66.dp.roundToPx() }) }
+    val shown = state.barVisible || state.urlFocused
+    val slide = remember { Animatable(1f) }
+    // Whether the page is currently laid out below (or above) the bar. Changes only when a slide ends.
+    var settled by remember { mutableStateOf(true) }
+    LaunchedEffect(shown) {
+        slide.animateTo(if (shown) 1f else 0f, tween(Motion.MEDIUM, easing = Motion.decelerate))
+        settled = shown
+    }
+    val padPx = if (settled) barPx else 0
+    val pad = with(density) { padPx.toDp() }
+
+    Box(modifier.fillMaxWidth().clipToBounds()) {
+        WebArea(
+            state,
+            host,
+            Modifier
+                .fillMaxSize()
+                .padding(top = if (bottom) 0.dp else pad, bottom = if (bottom) pad else 0.dp)
+                .graphicsLayer {
+                    val offset = barPx * slide.value - padPx
+                    translationY = if (bottom) -offset else offset
+                },
+        )
+        Box(
+            Modifier
+                .align(if (bottom) Alignment.BottomCenter else Alignment.TopCenter)
+                .graphicsLayer {
+                    val away = (1f - slide.value) * barPx
+                    translationY = if (bottom) away else -away
+                }
+                .background(scheme.surfaceContainer)
+                .onSizeChanged { if (it.height > 0) barPx = it.height },
+        ) { TopBar(state, host) }
+    }
 }
 
 @Composable
@@ -608,11 +641,15 @@ private fun WebArea(state: BrowserState, host: BrowserHost, modifier: Modifier) 
 
         if (state.locked) LockedCover(host)
 
+        Box(Modifier.align(if (state.toolbarBottom) Alignment.BottomCenter else Alignment.TopCenter)) {
+            LoadProgress(state)
+        }
+
         val typed = state.typed.text
         val show = state.urlFocused && typed.isNotEmpty() && typed != host.currentUrl()
         var rows by remember { mutableStateOf(emptyList<Suggestion>()) }
         LaunchedEffect(typed, show) {
-            if (show) rows = buildSuggestions(context, host, typed.trim())
+            if (show) rows = withContext(Dispatchers.Default) { buildSuggestions(context, host, typed.trim()) }
         }
         val bottom = state.toolbarBottom
         AnimatedVisibility(

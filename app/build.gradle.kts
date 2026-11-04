@@ -57,6 +57,16 @@ android {
             signingConfig = signingConfigs.findByName("release")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
+        // The release build with the public debug key, so it can be installed for testing. It is minified and not
+        // debuggable, so it shows how the app really performs (debug builds of Compose are much slower).
+        // Never publish it: it is signed with a key everyone has.
+        create("optimized") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            applicationIdSuffix = ".optimized"
+            versionNameSuffix = "-optimized"
+            matchingFallbacks += "release"
+        }
     }
 
     compileOptions {

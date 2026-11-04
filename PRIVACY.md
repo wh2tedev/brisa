@@ -9,7 +9,7 @@ Last updated: October 27, 2026. Applies to Brisa 0.10.0 and later.
 - Bookmarks you add.
 - Browsing history, if *Save browsing history* is on. It is used for address-bar suggestions. You can turn it off or clear it.
 - Your open tabs, if *Restore tabs on launch* is on.
-- Your settings, the sites where you turned tracker blocking off, and your download folder choice.
+- Your settings, the sites where you turned tracker blocking off, your download folder choices (general and per site), the sites you locked, the answers you saved when sites asked for camera, microphone or location and, if you use the decoy history, a random number that makes it look the same each time. Private tabs are never written to disk.
 - The list of your downloads. The files themselves are in the folder you chose.
 - Cookies, cache and site data kept by the system WebView for the sites you visit.
 - Whether app lock is on. Your fingerprint, face or screen-lock code is handled by Android. Brisa never sees or stores it.

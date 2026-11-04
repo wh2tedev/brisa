@@ -17,7 +17,7 @@ jobs:
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;37.0.0"
       - name: Test, lint and build
-        run: gradle testDebugUnitTest lintDebug assembleDebug assembleRelease --no-daemon
+        run: gradle testDebugUnitTest lintDebug assembleDebug assembleRelease assembleOptimized --no-daemon
       - name: Check permissions
         run: |
           APK=app/build/outputs/apk/release/app-release-unsigned.apk
@@ -29,6 +29,10 @@ jobs:
             echo "A sensitive permission appeared. Update PRIVACY.md and the README before allowing it."
             exit 1
           fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brisa-optimized
+          path: app/build/outputs/apk/optimized/*.apk
       - uses: actions/upload-artifact@v4
         with:
           name: brisa-debug

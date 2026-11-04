@@ -28,6 +28,10 @@ Google is the default search engine, and you can change it. No analytics, no acc
 - Tabs are restored on launch (only the selected tab loads until you open the others)
 - Optional download confirmation, including `data:` and `blob:` downloads
 - Tracker and ad blocking for third-party requests (Off, Standard or Strict), with per-site exceptions and a count of what was blocked on each page
+- Private tabs (separate cookies and storage when the system WebView supports it, never saved to disk), plus locked tabs and sites that need your fingerprint or screen lock
+- Download folder per site, rename before downloading, and retry for failed downloads
+- One-handed mode for the left or right hand, and an address bar that tucks away while you scroll
+- An optional decoy browsing history that hides the real one
 - Opens `http` and `https` links from other apps
 
 ## Building
@@ -88,7 +92,7 @@ The Origin Private File System is a separate feature and does not need any of th
 ## Not yet implemented
 
 Private tabs are not possible with a plain `WebView`, which shares a single cookie store across the app.
-Bookmark folders and per-site permissions are not implemented.
+Bookmark folders are not implemented.
 
 ## Updating
 
